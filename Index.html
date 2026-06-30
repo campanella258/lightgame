@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>リフレクト・レーザー・ゲーム</title>
+<style>
+  /* 5. UI・デザイン・演出の仕様: 基本デザイン（白黒ベース、背景白、格子黒） */
+  body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    background-color: #ffffff;
+    color: #000000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    margin: 0;
+  }
+
+  h1 {
+    font-size: 24px;
+    margin-bottom: 10px;
+  }
+
+  .container {
+    text-align: center;
+    max-width: 400px;
+    width: 100%;
+  }
+
+  .status-box {
+    min-height: 40px;
+    margin: 10px 0;
+    font-weight: bold;
+    font-size: 14px;
+  }
+
+  .controls {
+    margin-bottom: 15px;
+  }
+
+  button {
+    background-color: #ffffff;
+    color: #000000;
+    border: 2px solid #000000;
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    margin: 5px;
+    transition: background-color 0.2s;
+  }
+
+  button:hover:not(:disabled) {
+    background-color: #e0e0e0;
+  }
+
+  button:disabled {
+    border-color: #cccccc;
+    color: #cccccc;
+    cursor: not-allowed;
+  }
+
+  #sun-info {
+    font-size: 16px;
+    font-weight: bold;
+    margin-bottom: 5px;
+  }
+
+  /* 3. サンの表示（3x3マス） */
+  .grid-container {
+    position: relative;
+    width: 270px;
+    height: 270px;
+    margin: 10px auto;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 90px);
+    grid-template-rows: repeat(3, 90px);
+    border: 3px solid #000000;
+    background-color: #ffffff;
+    width: 270px;
+    height: 270px;
+    box-sizing: border-box;
+  }
+
+  .cell {
+    border: 1px solid #000000;
+    box-sizing: border-box;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 28px;
+    font-weight: bold;
+    user-select: none;
+    cursor: pointer;
+  }
+
+  /* 5. 配色仕様 */
+  .cell.wall {
+    background-color: #000000; /* 壁: 黒 */
+    cursor: not-allowed;
+  }
+  .cell.start {
+    background-color: #0000ff; /* スタート: 青 */
+    color: #ffffff;
+    cursor: not-allowed;
+  }
+  .cell.goal {
+    background-color: #ff0000; /* ゴール: 赤 */
+    color: #ffffff;
+    cursor: not-allowed;
+  }
+  .cell.itemA {
+    background-color: #ffff00; /* アイテムA: 黄色（⚠️） */
+    color: #000000;
+    cursor: not-allowed;
+  }
+
+  /* 鏡の表示 */
+  .mirror {
+    position: absolute;
+    font-size: 40px;
+    color: #000000;
+    font-weight: normal;
+  }
+
+  /* 5. 光の演出: 赤い照射線をCanvasで重ねて描画 */
+  #laser-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 270px;
+    height: 270px;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* ナビゲーションを助ける全体のミニマップ (9x9) */
+  .minimap-title {
+    font-size: 12px;
+    margin-top: 20px;
+    margin-bottom: 5px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .minimap {
+    display: grid;
+    grid-template-columns: repeat(9, 18px);
+    grid-template-rows: repeat(9, 18px);
+    border: 2px solid #000000;
+    margin: 0 auto;
+    width: 162px;
+    height: 162px;
+  }
+
+  .mini-cell {
+    border: 1px solid #e0e0e0;
+    box-sizing: border-box;
+    position: relative;
+  }
+
+  .mini-cell.wall { background-color: #000000; }
+  .mini-cell.start { background-color: #0000ff; }
+  .mini-cell.goal { background-color: #ff0000; }
+  .mini-cell.itemA { background-color: #ffff00; }
+  
+  /* 現在表示しているサンのエリアをミニマップ上で視覚化 */
+  .mini-cell.current-sub {
+    background-color: #f0f0f0;
+    border: 1px solid #000000;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>Reflect Laser</h1>
+  
+  <div class="controls">
+    <button id="btn-prev" onclick="prevSun()">◀ 前に戻る</button>
+    <button id="btn-next" onclick="nextSun()">次に行く ▶</button>
+  </div>
+
+  <div id="sun-info">サン: 1の1</div>
+
+  <div class="grid-container">
+    <div id="grid" class="grid"></div>
+    <canvas id="laser-canvas" width="270" height="270"></canvas>
+  </div>
+
+  <div class="controls">
+    <button id="btn-laser" onclick="startLaser()">照射 / 再照射</button>
+    <button onclick="initGame()">盤面を再生成</button>
+  </div>
+
+  <div id="status" class="status-box">鏡を配置して、光をゴールへ導いてください。</div>
+
+  <div class="minimap-title">全体マップ (9 × 9)</div>
+  <div id="minimap" class="minimap"></div>
+</div>
+
+<script>
+// 1. 用語の定義に基づくデータ構造の管理
+let board = [];       // 9x9の盤面データ
+let startPos = null;  // スタート座標 {r, c}
+let goalPos = null;   // ゴール座標 {r, c}
+let currentSun = 0;   // 現在表示中のサン (0～8)
+let rayPath = [];     // 光の軌跡データ [{r, c}, ...]
+let isDrawing = false;// 光が伸びている最中かどうかのフラグ
+let laserTimer = null;// アニメーション用タイマー
+let gameCleared = false;
+
+// 光のリアルタイム追跡用
+let simR, simC, simDr, simDc;
+
+// 2. 盤面生成の仕組み（ルール）
+function initGame() {
+  if (laserTimer) clearInterval(laserTimer);
+  isDrawing = false;
+  gameCleared = false;
+  rayPath = [];
+  currentSun = 0;
+  document.getElementById('status').innerText = "新しい盤面が生成されました。鏡を配置してください。";
+
+  // 9x9の空盤面作成
+  board = [];
+  for (let r = 0; r < 9; r++) {
+    board[r] = [];
+    for (let c = 0; c < 9; c++) {
+      board[r][c] = { type: 'normal', mirror: null };
+    }
+  }
+
+  // ルール: 1つのサンにつき、ランダムに2つのマスが「壁」になる
+  for (let sunR = 0; sunR < 3; sunR++) {
+    for (let sunC = 0; sunC < 3; sunC++) {
+      let cellsInSun = [];
+      for (let r = sunR * 3; r < sunR * 3 + 3; r++) {
+        for (let c = sunC * 3; c < sunC * 3 + 3; c++) {
+          cellsInSun.push({r, c});
+        }
+      }
+      shuffle(cellsInSun);
+      board[cellsInSun[0].r][cellsInSun[0].c].type = 'wall';
+      board[cellsInSun[1].r][cellsInSun[1].c].type = 'wall';
+    }
+  }
+
+  // ルール: 盤面全体の中からランダムに2つのマスに「アイテムA」が配置（最初から公開）
+  let emptyCells = [];
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      if (board[r][c].type === 'normal') emptyCells.push({r, c});
+    }
+  }
+  shuffle(emptyCells);
+  if (emptyCells.length >= 2) {
+    board[emptyCells[0].r][emptyCells[0].c].type = 'itemA';
+    board[emptyCells[1].r][emptyCells[1].c].type = 'itemA';
+  }
+
+  // ルール: スタートとゴールの配置（同じサンには来ない、かつ一番外周のマス）
+  let success = false;
+  while (!success) {
+    let borderCells = [];
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        if ((r === 0 || r === 8 || c === 0 || c === 8) && board[r][c].type === 'normal') {
+          borderCells.push({r, c});
+        }
+      }
+    }
+
+    shuffle(borderCells);
+    let start = borderCells[0];
+    let startSun = Math.floor(start.r / 3) * 3 + Math.floor(start.c / 3);
+
+    // 異なるサンに属するゴール候補を探す
+    let goal = null;
+    for (let i = 1; i < borderCells.length; i++) {
+      let g = borderCells[i];
+      let goalSun = Math.floor(g.r / 3) * 3 + Math.floor(g.c / 3);
+      if (startSun !== goalSun) {
+        goal = g;
+        break;
+      }
+    }
+
+    if (goal) {
+      startPos = start;
+      goalPos = goal;
+      board[start.r][start.c].type = 'start';
+      board[goal.r][goal.c].type = 'goal';
+      success = true;
+    }
+  }
+
+  render();
+}
+
+// 4. 照射中・照射後の操作の仕組み
+function startLaser() {
+  if (gameCleared) return;
+
+  // ルール: 再照射（途中で仕切り直してもう一度光を放つ）は「可能」
+  if (laserTimer) clearInterval(laserTimer);
+  
+  rayPath = [];
+  isDrawing = true;
+  document.getElementById('status').innerText = "光を照射中...";
+
+  simR = startPos.r;
+  simC = startPos.c;
+
+  // スタートマスの位置から、自動的に内側（盤面中央）を向くように初期方向を決定
+  if (simR === 0) { simDr = 1; simDc = 0; }
+  else if (simR === 8) { simDr = -1; simDc = 0; }
+  else if (simC === 0) { simDr = 0; simDc = 1; }
+  else if (simC === 8) { simDr = 0; simDc = -1; }
+
+  // 5. 光の演出: スタートから1マスずつ「順次描画」される (150ms間隔)
+  laserTimer = setInterval(() => {
+    rayPath.push({r: simR, c: simC});
+    renderLaser();
+    renderMinimap();
+
+    // 3. クリア判定: 光が出口（ゴール）に到達した瞬間に自動でクリア
+    if (simR === goalPos.r && simC === goalPos.c) {
+      clearInterval(laserTimer);
+      isDrawing = false;
+      gameCleared = true;
+      document.getElementById('status').innerText = "🎉 ステージクリア！ゴールに到達しました！";
+      return;
+    }
+
+    // 4. ペナルティ: 光がアイテムAに触れた瞬間、すべての鏡が自動的に消滅する
+    if (board[simR][simC].type === 'itemA') {
+      clearInterval(laserTimer);
+      isDrawing = false;
+      clearAllMirrors();
+      rayPath = []; // 照射線もクリア
+      render();
+      document.getElementById('status').innerText = "⚠️ アイテムAに接触！すべての鏡が消滅しました。";
+      return;
+    }
+
+    // 鏡（/ または \）による方向転換の計算
+    let mirror = board[simR][simC].mirror;
+    if (mirror === '/') {
+      let temp = simDr;
+      simDr = -simDc;
+      simDc = -temp;
+    } else if (mirror === '\\') {
+      let temp = simDr;
+      simDr = simDc;
+      simDc = temp;
+    }
+
+    // 次のマスへの移動
+    let nextR = simR + simDr;
+    let nextC = simC + simDc;
+
+    // 壁に当たった、または盤面外に出た場合の処理
+    if (nextR < 0 || nextR > 8 || nextC < 0 || nextC > 8 || board[nextR][nextC].type === 'wall') {
+      clearInterval(laserTimer);
+      isDrawing = false;
+      document.getElementById('status').innerText = "照射終了（障害物に遮断されました）";
+      return;
+    }
+
+    simR = nextR;
+    simC = nextC;
+  }, 150);
+}
+
+// すべての鏡を消滅させる
+function clearAllMirrors() {
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      board[r][c].mirror = null;
+    }
+  }
+}
+
+// 3. サンの行き来（表示切り替え）
+function prevSun() {
+  currentSun = (currentSun - 1 + 9) % 9;
+  render();
+}
+
+function nextSun() {
+  currentSun = (currentSun + 1) % 9;
+  render();
+}
+
+// 画面の再描画処理の統括
+function render() {
+  renderGrid();
+  renderLaser();
+  renderMinimap();
+}
+
+// 表示中サン（3x3マス）のDOM生成
+function renderGrid() {
+  const gridEl = document.getElementById('grid');
+  gridEl.innerHTML = '';
+
+  let sunR = Math.floor(currentSun / 3);
+  let sunC = currentSun % 3;
+
+  document.getElementById('sun-info').innerText = `表示中のサン: [縦 ${sunR + 1}列目, 横 ${sunC + 1}列目]`;
+
+  // 3x3のローカルマスを描画
+  for (let lr = 0; lr < 3; lr++) {
+    for (let lc = 0; lc < 3; lc++) {
+      let r = sunR * 3 + lr;
+      let c = sunC * 3 + lc;
+      let cellData = board[r][c];
+
+      const cellEl = document.createElement('div');
+      cellEl.className = 'cell';
+
+      // 5. 配色・デザインの適用
+      if (cellData.type === 'wall') cellEl.classList.add('wall');
+      if (cellData.type === 'start') { cellEl.classList.add('start'); cellEl.innerText = 'S'; }
+      if (cellData.type === 'goal') { cellEl.classList.add('goal'); cellEl.innerText = 'G'; }
+      if (cellData.type === 'itemA') { cellEl.classList.add('itemA'); cellEl.innerText = '⚠️'; }
+
+      // 3. 鏡の配置（表示）
+      if (cellData.mirror) {
+        const mirrorEl = document.createElement('div');
+        mirrorEl.className = 'mirror';
+        mirrorEl.innerText = cellData.mirror;
+        cellEl.appendChild(mirrorEl);
+      }
+
+      // クリック時の鏡設置・変更ロジック
+      cellEl.addEventListener('click', () => {
+        // 4. 光が伸びている最中（描画中）は鏡の配置不可
+        if (isDrawing) return;
+        if (cellData.type !== 'normal') return; // 壁やスタート等には置けない
+
+        // 3. 枚数無制限 / 切り替え（なし -> / -> \ -> なし）
+        if (!cellData.mirror) {
+          cellData.mirror = '/';
+        } else if (cellData.mirror === '/') {
+          cellData.mirror = '\\';
+        } else {
+          cellData.mirror = null;
+        }
+
+        // 4. 描画終了後に鏡を変更した瞬間、前に描画されていた照射線は消える
+        rayPath = [];
+        document.getElementById('status').innerText = "鏡が更新されました。再度照射してください。";
+        render();
+      });
+
+      gridEl.appendChild(cellEl);
+    }
+  }
+}
+
+// Canvasを使ったレーザー照射線の描画
+function renderLaser() {
+  const canvas = document.getElementById('laser-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (rayPath.length === 0) return;
+
+  let sunR = Math.floor(currentSun / 3);
+  let sunC = currentSun % 3;
+
+  ctx.beginPath();
+  ctx.strokeStyle = '#ff0000'; // 5. 光の色は赤
+  ctx.lineWidth = 5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  let started = false;
+  for (let i = 0; i < rayPath.length; i++) {
+    let p = rayPath[i];
+    
+    // 盤面全体(9x9)の絶対座標からマスの中心点を算出 (1マス90px)
+    let globalX = p.c * 90 + 45;
+    let globalY = p.r * 90 + 45;
+
+    // 現在表示されているサン基準の座標にオフセット変換
+    let localX = globalX - (sunC * 3 * 90);
+    let localY = globalY - (sunR * 3 * 90);
+
+    if (!started) {
+      ctx.moveTo(localX, localY);
+      started = true;
+    } else {
+      ctx.lineTo(localX, localY);
+    }
+  }
+  ctx.stroke();
+}
+
+// 補助機能: 9x9 全体マップの描画
+function renderMinimap() {
+  const minimapEl = document.getElementById('minimap');
+  minimapEl.innerHTML = '';
+
+  let activeSunR = Math.floor(currentSun / 3);
+  let activeSunC = currentSun % 3;
+
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const miniCell = document.createElement('div');
+      miniCell.className = 'mini-cell';
+
+      let cellData = board[r][c];
+      if (cellData.type === 'wall') miniCell.classList.add('wall');
+      if (cellData.type === 'start') miniCell.classList.add('start');
+      if (cellData.type === 'goal') miniCell.classList.add('goal');
+      if (cellData.type === 'itemA') miniCell.classList.add('itemA');
+
+      // 現在見ているサンの範囲を薄いグレーで強調
+      let cellSunR = Math.floor(r / 3);
+      let cellSunC = Math.floor(c / 3);
+      if (cellSunR === activeSunR && cellSunC === activeSunC) {
+        miniCell.classList.add('current-sub');
+      }
+
+      // ミニマップ上にも配置された鏡を表示
+      if (cellData.mirror) {
+        miniCell.style.display = 'flex';
+        miniCell.style.justifyContent = 'center';
+        miniCell.style.alignItems = 'center';
+        miniCell.style.fontSize = '9px';
+        miniCell.style.color = cellData.type === 'wall' ? '#fff' : '#000';
+        miniCell.innerText = cellData.mirror;
+      }
+
+      // レーザーの軌跡をミニマップ上に赤いドットで可視化
+      let inPath = rayPath.some(p => p.r === r && p.c === c);
+      if (inPath) {
+        let dot = document.createElement('div');
+        dot.style.position = 'absolute';
+        dot.style.width = '4px';
+        dot.style.height = '4px';
+        dot.style.backgroundColor = '#ff0000';
+        dot.style.borderRadius = '50%';
+        dot.style.top = '6px';
+        dot.style.left = '6px';
+        miniCell.appendChild(dot);
+      }
+
+      minimapEl.appendChild(miniCell);
+    }
+  }
+}
+
+// シャッフル用ユーティリティ
+function shuffle(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[array[j]]] = [array[j], array[array[i]]];
+  }
+}
+
+// 初期起動
+initGame();
+</script>
+
+</body>
+</html>
