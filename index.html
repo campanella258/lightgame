@@ -176,6 +176,36 @@ function getReflectedDir(dir, mirror) {
     return dir;
 }
 
+// 【追加】スタートからゴールまで障害物を避けて繋がっているかを確認する関数
+function checkPathExists() {
+    let queue = [{ x: startEdge.x, y: startEdge.y }];
+    let visited = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(false));
+    visited[startEdge.y][startEdge.x] = true;
+
+    while (queue.length > 0) {
+        let curr = queue.shift();
+        
+        // ゴール地点に到達できればクリア可能なルートが存在する
+        if (curr.x === goalEdge.x && curr.y === goalEdge.y) {
+            return true;
+        }
+
+        for (let i = 0; i < 4; i++) {
+            let nx = curr.x + DX[i];
+            let ny = curr.y + DY[i];
+            
+            if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                // 壁やアイテムAを避け、未訪問の空きマスのみ進む
+                if (!visited[ny][nx] && grid[ny][nx].type === 'empty') {
+                    visited[ny][nx] = true;
+                    queue.push({ x: nx, y: ny });
+                }
+            }
+        }
+    }
+    return false; // 道が塞がれている
+}
+
 function initGame() {
     remainingShoots = 5;
     isShooting = false;
@@ -183,64 +213,59 @@ function initGame() {
     laserPts = [];
     if (animReq) cancelAnimationFrame(animReq);
 
-    for (let y = 0; y < GRID_SIZE; y++) {
-        grid[y] = [];
-        for (let x = 0; x < GRID_SIZE; x++) {
-            grid[y][x] = { type: 'empty', mirror: 0 };
-        }
-    }
-
     let edges = [];
     for (let x = 0; x < 9; x++) edges.push({ x: x, y: 0, side: 'top', dir: DIR_DOWN, sectorId: Math.floor(x / 3) });
     for (let x = 0; x < 9; x++) edges.push({ x: x, y: 8, side: 'bottom', dir: DIR_UP, sectorId: 6 + Math.floor(x / 3) });
     for (let y = 0; y < 9; y++) edges.push({ x: 0, y: y, side: 'left', dir: DIR_RIGHT, sectorId: Math.floor(y / 3) * 3 });
     for (let y = 0; y < 9; y++) edges.push({ x: 8, y: y, side: 'right', dir: DIR_LEFT, sectorId: Math.floor(y / 3) * 3 + 2 });
 
-    startEdge = edges[Math.floor(Math.random() * edges.length)];
-    while (true) {
-        let candidate = edges[Math.floor(Math.random() * edges.length)];
-        if (candidate.sectorId !== startEdge.sectorId) {
-            goalEdge = candidate;
-            break;
+    let boardValid = false;
+    
+    // 【修正】道が繋がっている盤面が生成されるまで何度でもやり直す
+    while (!boardValid) {
+        // グリッド初期化
+        for (let y = 0; y < GRID_SIZE; y++) {
+            grid[y] = [];
+            for (let x = 0; x < GRID_SIZE; x++) {
+                grid[y][x] = { type: 'empty', mirror: 0 };
+            }
         }
-    }
 
-    // 【修正】壁の配置（各セクター2個）
-    for (let sy = 0; sy < 3; sy++) {
-        for (let sx = 0; sx < 3; sx++) {
-            let wallsPlaced = 0;
-            while (wallsPlaced < 2) {
-                let dx = Math.floor(Math.random() * 3);
-                let dy = Math.floor(Math.random() * 3);
-                let x = sx * 3 + dx;
-                let y = sy * 3 + dy;
-                
-                if ((x === startEdge.x && y === startEdge.y) || (x === goalEdge.x && y === goalEdge.y)) continue;
-                if (grid[y][x].type === 'empty') {
-                    grid[y][x].type = 'wall';
-                    wallsPlaced++;
+        // スタートとゴールを配置
+        startEdge = edges[Math.floor(Math.random() * edges.length)];
+        while (true) {
+            let candidate = edges[Math.floor(Math.random() * edges.length)];
+            if (candidate.sectorId !== startEdge.sectorId) {
+                goalEdge = candidate;
+                break;
+            }
+        }
+
+        // 障害物を配置（各セクターにつき：壁×2、アイテムA×1）
+        for (let sy = 0; sy < 3; sy++) {
+            for (let sx = 0; sx < 3; sx++) {
+                let obstaclesToPlace = ['wall', 'wall', 'itemA'];
+                for (let item of obstaclesToPlace) {
+                    while (true) {
+                        let dx = Math.floor(Math.random() * 3);
+                        let dy = Math.floor(Math.random() * 3);
+                        let x = sx * 3 + dx;
+                        let y = sy * 3 + dy;
+                        
+                        // スタート地点とゴール地点には障害物を置かない
+                        if ((x === startEdge.x && y === startEdge.y) || (x === goalEdge.x && y === goalEdge.y)) continue;
+                        
+                        if (grid[y][x].type === 'empty') {
+                            grid[y][x].type = item;
+                            break;
+                        }
+                    }
                 }
             }
         }
-    }
 
-    // 【修正】アイテムAの配置（各セクターに確実に1つずつ、計9個）
-    for (let sy = 0; sy < 3; sy++) {
-        for (let sx = 0; sx < 3; sx++) {
-            let itemsPlaced = 0;
-            while (itemsPlaced < 1) {
-                let dx = Math.floor(Math.random() * 3);
-                let dy = Math.floor(Math.random() * 3);
-                let x = sx * 3 + dx;
-                let y = sy * 3 + dy;
-                
-                if ((x === startEdge.x && y === startEdge.y) || (x === goalEdge.x && y === goalEdge.y)) continue;
-                if (grid[y][x].type === 'empty') {
-                    grid[y][x].type = 'itemA';
-                    itemsPlaced++;
-                }
-            }
-        }
+        // 盤面がクリア可能か検証
+        boardValid = checkPathExists();
     }
 
     updateUI();
@@ -305,7 +330,6 @@ function createCell(x, y, container) {
     container.appendChild(div);
 }
 
-// 【修正】全体表示とセクター表示を切り替えられるように描画処理をアップデート
 function drawSector() {
     const container = document.getElementById('grid-container');
     const canvas = document.getElementById('laser-canvas');
