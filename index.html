@@ -5,11 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>光の反射パズル（リフレクションパズル）</title>
 <style>
-    /* 5. UI・デザイン・演出の仕様に準拠した基本デザイン */
     body {
         font-family: sans-serif;
         text-align: center;
-        background-color: #ffffff; /* 背景は「白」 */
+        background-color: #ffffff;
         color: #000000;
         margin-top: 30px;
     }
@@ -58,8 +57,9 @@
         width: 300px;
         height: 300px;
         margin: 0 auto;
-        border: 2px solid #000; /* 格子（マスの線）は「黒」 */
+        border: 2px solid #000;
         background-color: #fff;
+        overflow: hidden; /* 領域外のレーザーを隠す */
     }
     #grid-container {
         display: grid;
@@ -67,6 +67,8 @@
         grid-template-rows: repeat(3, 1fr);
         width: 100%;
         height: 100%;
+        position: relative;
+        z-index: 1; /* レーザーより下に配置 */
     }
     .cell {
         border: 1px solid #000;
@@ -75,12 +77,10 @@
         cursor: pointer;
         background-color: #fff;
     }
-    /* 壁: 黒（塗りつぶし） */
     .wall {
         background-color: #000;
         cursor: not-allowed;
     }
-    /* アイテムA: 〇を使用し、マスに収める */
     .item-a::before {
         content: '';
         position: absolute;
@@ -94,16 +94,16 @@
         box-sizing: border-box;
     }
     
+    /* 【修正】鏡のグラデーションの向きをロジックと完全に一致させました */
     /* 鏡 (/) : mirror=1 */
     .mirror-1 {
-        background-image: linear-gradient(to top right, transparent calc(50% - 2px), black calc(50% - 2px), black calc(50% + 2px), transparent calc(50% + 2px));
+        background-image: linear-gradient(to bottom right, transparent calc(50% - 2px), black calc(50% - 2px), black calc(50% + 2px), transparent calc(50% + 2px));
     }
     /* 鏡 (\) : mirror=2 */
     .mirror-2 {
-        background-image: linear-gradient(to bottom right, transparent calc(50% - 2px), black calc(50% - 2px), black calc(50% + 2px), transparent calc(50% + 2px));
+        background-image: linear-gradient(to top right, transparent calc(50% - 2px), black calc(50% - 2px), black calc(50% + 2px), transparent calc(50% + 2px));
     }
     
-    /* スタート(青)・ゴール(赤)の表示（一辺のみ色付け） */
     .start-top { box-shadow: inset 0 8px 0 blue; }
     .start-bottom { box-shadow: inset 0 -8px 0 blue; }
     .start-left { box-shadow: inset 8px 0 0 blue; }
@@ -114,18 +114,19 @@
     .goal-left { box-shadow: inset 8px 0 0 red; }
     .goal-right { box-shadow: inset -8px 0 0 red; }
 
-    /* レーザー描画用キャンバス */
+    /* レーザー描画用キャンバス（盤面全体の900x900で描画し、CSSで表示位置をズラす） */
     #laser-canvas {
         position: absolute;
         top: 0;
         left: 0;
         pointer-events: none;
+        z-index: 2;
     }
 </style>
 </head>
 <body>
 
-<h1>光の反射パズル</h1>
+<h1>リフレクション</h1>
 
 <div id="status-container">
     残り照射回数: <span id="shoot-count">5</span> 回
@@ -142,14 +143,15 @@
 
 <div id="game-area">
     <div id="grid-container"></div>
-    <canvas id="laser-canvas" width="300" height="300"></canvas>
+    <canvas id="laser-canvas" width="900" height="900"></canvas>
 </div>
 
 <script>
 const GRID_SIZE = 9;
+const CELL_SIZE = 100; // 1マスのピクセルサイズ
 let grid = [];
 
-// 方向の定義: 0=上, 1=右, 2=下, 3=左
+// 方向: 0=上, 1=右, 2=下, 3=左
 const DIR_UP = 0, DIR_RIGHT = 1, DIR_DOWN = 2, DIR_LEFT = 3;
 const DX = [0, 1, 0, -1];
 const DY = [-1, 0, 1, 0];
@@ -161,11 +163,14 @@ let goalEdge = null;
 let isShooting = false;
 let isGameOver = false;
 let remainingShoots = 5;
-let laserPath = [];
-let animStep = 0;
-let laserInterval = null;
 
-// 反射ロジック
+// アニメーション用変数
+let animReq = null;
+let laserPts = [];
+let laserTotalLength = 0;
+let totalDrawnLength = 0;
+let lastTime = 0;
+
 function getReflectedDir(dir, mirror) {
     if (mirror === 0) return dir;
     if (mirror === 1) return [1, 0, 3, 2][dir]; // '/'
@@ -173,16 +178,13 @@ function getReflectedDir(dir, mirror) {
     return dir;
 }
 
-// ゲーム初期化処理
 function initGame() {
     remainingShoots = 5;
     isShooting = false;
     isGameOver = false;
-    laserPath = [];
-    animStep = 0;
-    if (laserInterval) clearInterval(laserInterval);
+    laserPts = [];
+    if (animReq) cancelAnimationFrame(animReq);
 
-    // 盤面生成 (9x9)
     for (let y = 0; y < GRID_SIZE; y++) {
         grid[y] = [];
         for (let x = 0; x < GRID_SIZE; x++) {
@@ -190,7 +192,6 @@ function initGame() {
         }
     }
 
-    // スタートとゴールの配置（外周限定）
     let edges = [];
     for (let x = 0; x < 9; x++) edges.push({ x: x, y: 0, side: 'top', dir: DIR_DOWN, sectorId: Math.floor(x / 3) });
     for (let x = 0; x < 9; x++) edges.push({ x: x, y: 8, side: 'bottom', dir: DIR_UP, sectorId: 6 + Math.floor(x / 3) });
@@ -200,14 +201,12 @@ function initGame() {
     startEdge = edges[Math.floor(Math.random() * edges.length)];
     while (true) {
         let candidate = edges[Math.floor(Math.random() * edges.length)];
-        // 同じサンには来ない制約
         if (candidate.sectorId !== startEdge.sectorId) {
             goalEdge = candidate;
             break;
         }
     }
 
-    // 壁の配置（1つのサンにつき2つ、スタート・ゴールは避ける）
     for (let sy = 0; sy < 3; sy++) {
         for (let sx = 0; sx < 3; sx++) {
             let wallsPlaced = 0;
@@ -217,9 +216,7 @@ function initGame() {
                 let x = sx * 3 + dx;
                 let y = sy * 3 + dy;
                 
-                if ((x === startEdge.x && y === startEdge.y) || (x === goalEdge.x && y === goalEdge.y)) {
-                    continue;
-                }
+                if ((x === startEdge.x && y === startEdge.y) || (x === goalEdge.x && y === goalEdge.y)) continue;
                 if (grid[y][x].type === 'empty') {
                     grid[y][x].type = 'wall';
                     wallsPlaced++;
@@ -228,15 +225,12 @@ function initGame() {
         }
     }
 
-    // アイテムAの配置（全体から2つ、スタート・ゴールは避ける）
     let itemsPlaced = 0;
     while (itemsPlaced < 2) {
         let x = Math.floor(Math.random() * GRID_SIZE);
         let y = Math.floor(Math.random() * GRID_SIZE);
         
-        if ((x === startEdge.x && y === startEdge.y) || (x === goalEdge.x && y === goalEdge.y)) {
-            continue;
-        }
+        if ((x === startEdge.x && y === startEdge.y) || (x === goalEdge.x && y === goalEdge.y)) continue;
         if (grid[y][x].type === 'empty') {
             grid[y][x].type = 'itemA';
             itemsPlaced++;
@@ -253,7 +247,6 @@ function updateUI() {
     document.getElementById('shoot-btn').disabled = isGameOver;
 }
 
-// サンの切り替え
 function changeSector(dir) {
     currentSectorId += dir;
     if (currentSectorId < 0) currentSectorId = 8;
@@ -262,13 +255,16 @@ function changeSector(dir) {
     drawSector();
 }
 
-// 現在のサン（3x3）を描画
 function drawSector() {
     const container = document.getElementById('grid-container');
     container.innerHTML = '';
 
     let sy = Math.floor(currentSectorId / 3);
     let sx = currentSectorId % 3;
+
+    // キャンバスの位置を移動させ、該当セクター部分を表示させる
+    const canvas = document.getElementById('laser-canvas');
+    canvas.style.transform = `translate(-${sx * 300}px, -${sy * 300}px)`;
 
     for (let y = sy * 3; y < sy * 3 + 3; y++) {
         for (let x = sx * 3; x < sx * 3 + 3; x++) {
@@ -284,16 +280,14 @@ function drawSector() {
             if (startEdge.x === x && startEdge.y === y) div.classList.add('start-' + startEdge.side);
             if (goalEdge.x === x && goalEdge.y === y) div.classList.add('goal-' + goalEdge.side);
 
-            // 鏡の配置処理
             div.onclick = () => {
-                // 描画中の鏡の配置は不可
                 if (isShooting || isGameOver) return; 
                 if (cell.type === 'wall' || cell.type === 'itemA') return; 
 
                 // 描画終了後に鏡を変更した瞬間、前の照射線を消す
-                if (animStep > 0 && !isShooting) {
-                    laserPath = [];
-                    animStep = 0;
+                if (!isShooting && laserPts.length > 0) {
+                    laserPts = [];
+                    drawCanvas();
                 }
 
                 cell.mirror = (cell.mirror + 1) % 3;
@@ -302,16 +296,15 @@ function drawSector() {
             container.appendChild(div);
         }
     }
-    drawLaser();
+    drawCanvas();
 }
 
-// レーザー照射処理
+// 【修正】レーザーの軌道（座標）をピクセル単位で正確に事前構築する
 function shootLaser() {
     if (isGameOver) return;
     
-    // 再照射の場合は現在のアニメーションをキャンセルして仕切り直す
-    if (isShooting && laserInterval) {
-        clearInterval(laserInterval);
+    if (isShooting && animReq) {
+        cancelAnimationFrame(animReq);
         isShooting = false;
     }
 
@@ -319,35 +312,55 @@ function shootLaser() {
 
     remainingShoots--;
     updateUI();
-    laserPath = [];
+    laserPts = [];
     
     let curX = startEdge.x;
     let curY = startEdge.y;
     let curDir = startEdge.dir; 
 
-    // レーザーの軌跡を事前計算
+    // スタート地点の座標
+    let startPx = curX * CELL_SIZE + CELL_SIZE / 2;
+    let startPy = curY * CELL_SIZE + CELL_SIZE / 2;
+    if (startEdge.side === 'top') startPy -= CELL_SIZE / 2;
+    if (startEdge.side === 'bottom') startPy += CELL_SIZE / 2;
+    if (startEdge.side === 'left') startPx -= CELL_SIZE / 2;
+    if (startEdge.side === 'right') startPx += CELL_SIZE / 2;
+
+    laserPts.push({ x: startPx, y: startPy, event: null });
+
     while (true) {
         if (curX < 0 || curX >= 9 || curY < 0 || curY >= 9) break; 
 
         let cell = grid[curY][curX];
-        let step = { x: curX, y: curY, inDir: curDir, outDir: null, event: null };
 
+        // 壁の場合は「辺」で止める（中心まで行かない）
         if (cell.type === 'wall') {
-            step.event = 'wall';
-            laserPath.push(step);
+            laserPts[laserPts.length - 1].event = 'wall';
             break;
         }
+
+        // マスの中心へ向かう
+        let cx = curX * CELL_SIZE + CELL_SIZE / 2;
+        let cy = curY * CELL_SIZE + CELL_SIZE / 2;
+        laserPts.push({ x: cx, y: cy, event: null });
+
         if (cell.type === 'itemA') {
-            step.event = 'itemA';
-            laserPath.push(step);
+            laserPts[laserPts.length - 1].event = 'itemA';
             break;
         }
 
+        // 鏡などでの反射・直進処理（マスを出る辺に向かう）
         let nextDir = getReflectedDir(curDir, cell.mirror);
-        step.outDir = nextDir;
-        laserPath.push(step);
+        let exitX = cx;
+        let exitY = cy;
+        if (nextDir === DIR_UP) exitY -= CELL_SIZE / 2;
+        if (nextDir === DIR_DOWN) exitY += CELL_SIZE / 2;
+        if (nextDir === DIR_LEFT) exitX -= CELL_SIZE / 2;
+        if (nextDir === DIR_RIGHT) exitX += CELL_SIZE / 2;
 
-        // ゴール判定（正しい辺から抜けるか）
+        laserPts.push({ x: exitX, y: exitY, event: null });
+
+        // ゴール判定
         let isGoal = false;
         if (goalEdge.x === curX && goalEdge.y === curY) {
             if (goalEdge.side === 'top' && nextDir === DIR_UP) isGoal = true;
@@ -357,7 +370,7 @@ function shootLaser() {
         }
 
         if (isGoal) {
-            step.event = 'goal';
+            laserPts[laserPts.length - 1].event = 'goal';
             break;
         }
 
@@ -366,94 +379,96 @@ function shootLaser() {
         curDir = nextDir;
     }
 
-    // 順次描画アニメーション
-    isShooting = true;
-    animStep = 0;
-    laserInterval = setInterval(() => {
-        animStep++;
-        drawSector();
-        
-        let currentStep = laserPath[animStep - 1];
+    // 全区間の距離を計算
+    laserTotalLength = 0;
+    for (let i = 1; i < laserPts.length; i++) {
+        let dx = laserPts[i].x - laserPts[i-1].x;
+        let dy = laserPts[i].y - laserPts[i-1].y;
+        laserPts[i].dist = Math.sqrt(dx * dx + dy * dy);
+        laserTotalLength += laserPts[i].dist;
+    }
 
-        // 各種イベント（アイテムA・ゴール）に到達した「瞬間」に判定を行う
-        if (currentStep && currentStep.event === 'itemA') {
-            clearInterval(laserInterval);
-            isShooting = false;
-            setTimeout(() => {
-                alert('アイテムAに触れました！盤面のすべての鏡が消滅します。');
-                for (let y = 0; y < 9; y++) {
-                    for (let x = 0; x < 9; x++) grid[y][x].mirror = 0;
-                }
-                laserPath = [];
-                animStep = 0;
-                drawSector();
-            }, 50);
-        } else if (currentStep && currentStep.event === 'goal') {
-            clearInterval(laserInterval);
-            isShooting = false;
+    totalDrawnLength = 0;
+    isShooting = true;
+    lastTime = performance.now();
+    animReq = requestAnimationFrame(animateLaser);
+}
+
+// 【修正】カクカク進むのをやめ、ピクセル単位で滑らかにアニメーションさせる
+function animateLaser(time) {
+    let dt = time - lastTime;
+    lastTime = time;
+    
+    // レーザーの伸びるスピード (ピクセル/ミリ秒)
+    let speed = 0.8; 
+    totalDrawnLength += speed * dt;
+
+    if (totalDrawnLength >= laserTotalLength) {
+        totalDrawnLength = laserTotalLength;
+        isShooting = false;
+        drawCanvas();
+        handleLaserEnd(laserPts[laserPts.length - 1].event);
+    } else {
+        drawCanvas();
+        animReq = requestAnimationFrame(animateLaser);
+    }
+}
+
+function handleLaserEnd(event) {
+    setTimeout(() => {
+        if (event === 'itemA') {
+            alert('アイテムAに触れました！盤面のすべての鏡が消滅します。');
+            for (let y = 0; y < 9; y++) {
+                for (let x = 0; x < 9; x++) grid[y][x].mirror = 0;
+            }
+            laserPts = [];
+            drawCanvas();
+            drawSector();
+        } else if (event === 'goal') {
             isGameOver = true;
             updateUI();
-            setTimeout(() => {
-                alert('クリア！光がゴールに到達しました。');
-            }, 50);
-        } else if (animStep >= laserPath.length) {
-            // 通常の描画終了（外枠に出た、または壁に当たった等）
-            clearInterval(laserInterval);
-            isShooting = false;
-            
+            alert('クリア！光がゴールに到達しました。');
+        } else {
             if (remainingShoots === 0) {
                 isGameOver = true;
                 updateUI();
-                setTimeout(() => {
-                    alert('ゲームオーバー！照射回数が上限に達しました。');
-                }, 50);
+                alert('ゲームオーバー！照射回数が上限に達しました。');
             }
         }
-    }, 200); 
+    }, 50);
 }
 
-// レーザーの描画 (Canvas)
-function drawLaser() {
+function drawCanvas() {
     const canvas = document.getElementById('laser-canvas');
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (laserPath.length === 0 || animStep === 0) return;
+    if (laserPts.length < 2) return;
 
-    // 光の色は赤
     ctx.strokeStyle = 'red';
     ctx.lineWidth = 4;
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.beginPath();
+    ctx.moveTo(laserPts[0].x, laserPts[0].y);
 
-    const CELL_SIZE = 100; // 300px / 3
-    let sy = Math.floor(currentSectorId / 3);
-    let sx = currentSectorId % 3;
-
-    for (let i = 0; i < animStep; i++) {
-        let step = laserPath[i];
-        
-        // 現在表示しているサンに含まれるマスのみ描画
-        if (Math.floor(step.x / 3) === sx && Math.floor(step.y / 3) === sy) {
-            let cx = (step.x % 3) * CELL_SIZE + CELL_SIZE / 2;
-            let cy = (step.y % 3) * CELL_SIZE + CELL_SIZE / 2;
-            
-            let inX = cx - DX[step.inDir] * CELL_SIZE / 2;
-            let inY = cy - DY[step.inDir] * CELL_SIZE / 2;
-            ctx.moveTo(inX, inY);
-            ctx.lineTo(cx, cy);
-
-            if (step.outDir !== null && step.event !== 'wall' && step.event !== 'itemA') {
-                let outX = cx + DX[step.outDir] * CELL_SIZE / 2;
-                let outY = cy + DY[step.outDir] * CELL_SIZE / 2;
-                ctx.lineTo(outX, outY);
-            }
+    let l = totalDrawnLength;
+    for (let i = 1; i < laserPts.length; i++) {
+        if (l >= laserPts[i].dist) {
+            ctx.lineTo(laserPts[i].x, laserPts[i].y);
+            l -= laserPts[i].dist;
+        } else {
+            // 到達距離に応じて線分を補間（滑らかに伸びる）
+            let ratio = l / laserPts[i].dist;
+            let ix = laserPts[i-1].x + (laserPts[i].x - laserPts[i-1].x) * ratio;
+            let iy = laserPts[i-1].y + (laserPts[i].y - laserPts[i-1].y) * ratio;
+            ctx.lineTo(ix, iy);
+            break;
         }
     }
     ctx.stroke();
 }
 
-// ゲーム開始
 initGame();
 </script>
 </body>
