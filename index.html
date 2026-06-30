@@ -44,7 +44,7 @@
         display: inline-block;
         width: 130px;
     }
-    /* 盤面エリア（3×3マス表示用） */
+    /* 盤面エリア */
     #game-area {
         position: relative;
         width: 300px;
@@ -66,12 +66,10 @@
         position: relative;
         cursor: pointer;
     }
-    /* 壁 */
     .wall {
         background-color: #000;
         cursor: not-allowed;
     }
-    /* アイテムA */
     .item-a::before {
         content: '';
         position: absolute;
@@ -84,15 +82,15 @@
         transform: translate(-50%, -50%);
         box-sizing: border-box;
     }
-    /* 鏡 (/) */
+    /* 鏡 (/) : mirror=1 */
     .mirror-1 {
         background-image: linear-gradient(to top right, transparent calc(50% - 2px), black calc(50% - 2px), black calc(50% + 2px), transparent calc(50% + 2px));
     }
-    /* 鏡 (\) */
+    /* 鏡 (\) : mirror=2 */
     .mirror-2 {
         background-image: linear-gradient(to bottom right, transparent calc(50% - 2px), black calc(50% - 2px), black calc(50% + 2px), transparent calc(50% + 2px));
     }
-    /* スタート（青）とゴール（赤）の辺 */
+    /* スタート・ゴールの表示 */
     .start-top { box-shadow: inset 0 8px 0 blue; }
     .start-bottom { box-shadow: inset 0 -8px 0 blue; }
     .start-left { box-shadow: inset 8px 0 0 blue; }
@@ -103,7 +101,6 @@
     .goal-left { box-shadow: inset 8px 0 0 red; }
     .goal-right { box-shadow: inset -8px 0 0 red; }
 
-    /* 光の描画用キャンバス */
     #laser-canvas {
         position: absolute;
         top: 0;
@@ -138,8 +135,12 @@
 const GRID_SIZE = 9;
 let grid = [];
 
-// 状態管理
-let currentSectorId = 0; // 0〜8
+// 方向の定義: 0=上, 1=右, 2=下, 3=左
+const DIR_UP = 0, DIR_RIGHT = 1, DIR_DOWN = 2, DIR_LEFT = 3;
+const DX = [0, 1, 0, -1];
+const DY = [-1, 0, 1, 0];
+
+let currentSectorId = 0;
 let startEdge = null;
 let goalEdge = null;
 
@@ -150,7 +151,14 @@ let laserPath = [];
 let animStep = 0;
 let laserInterval = null;
 
-// ゲーム初期化処理
+// ご提示いただいた反射ロジック
+function getReflectedDir(dir, mirror) {
+    if (mirror === 0) return dir;
+    if (mirror === 1) return [1, 0, 3, 2][dir]; // '/'
+    if (mirror === 2) return [3, 2, 1, 0][dir]; // '\'
+    return dir;
+}
+
 function initGame() {
     remainingShoots = 5;
     isShooting = false;
@@ -159,7 +167,6 @@ function initGame() {
     animStep = 0;
     if (laserInterval) clearInterval(laserInterval);
 
-    // 9x9の盤面を初期化
     for (let y = 0; y < GRID_SIZE; y++) {
         grid[y] = [];
         for (let x = 0; x < GRID_SIZE; x++) {
@@ -167,12 +174,13 @@ function initGame() {
         }
     }
 
-    // 1. スタートとゴールの配置（外周の辺のみ）を最初に決定
+    // スタートとゴールの配置
+    // 方向(dir)も0〜3のインデックスで管理
     let edges = [];
-    for (let x = 0; x < 9; x++) edges.push({ x: x, y: 0, side: 'top', dir: { dx: 0, dy: 1 }, sectorId: Math.floor(x / 3) });
-    for (let x = 0; x < 9; x++) edges.push({ x: x, y: 8, side: 'bottom', dir: { dx: 0, dy: -1 }, sectorId: 6 + Math.floor(x / 3) });
-    for (let y = 0; y < 9; y++) edges.push({ x: 0, y: y, side: 'left', dir: { dx: 1, dy: 0 }, sectorId: Math.floor(y / 3) * 3 });
-    for (let y = 0; y < 9; y++) edges.push({ x: 8, y: y, side: 'right', dir: { dx: -1, dy: 0 }, sectorId: Math.floor(y / 3) * 3 + 2 });
+    for (let x = 0; x < 9; x++) edges.push({ x: x, y: 0, side: 'top', dir: DIR_DOWN, sectorId: Math.floor(x / 3) });
+    for (let x = 0; x < 9; x++) edges.push({ x: x, y: 8, side: 'bottom', dir: DIR_UP, sectorId: 6 + Math.floor(x / 3) });
+    for (let y = 0; y < 9; y++) edges.push({ x: 0, y: y, side: 'left', dir: DIR_RIGHT, sectorId: Math.floor(y / 3) * 3 });
+    for (let y = 0; y < 9; y++) edges.push({ x: 8, y: y, side: 'right', dir: DIR_LEFT, sectorId: Math.floor(y / 3) * 3 + 2 });
 
     startEdge = edges[Math.floor(Math.random() * edges.length)];
     while (true) {
@@ -183,7 +191,7 @@ function initGame() {
         }
     }
 
-    // 2. 各セクターに壁を2つ配置（スタート・ゴールのあるマスは絶対に避ける）
+    // 壁の配置（スタート・ゴールは避ける）
     for (let sy = 0; sy < 3; sy++) {
         for (let sx = 0; sx < 3; sx++) {
             let wallsPlaced = 0;
@@ -193,11 +201,9 @@ function initGame() {
                 let x = sx * 3 + dx;
                 let y = sy * 3 + dy;
                 
-                // スタートマス・ゴールマスならスキップ
                 if ((x === startEdge.x && y === startEdge.y) || (x === goalEdge.x && y === goalEdge.y)) {
                     continue;
                 }
-
                 if (grid[y][x].type === 'empty') {
                     grid[y][x].type = 'wall';
                     wallsPlaced++;
@@ -206,7 +212,7 @@ function initGame() {
         }
     }
 
-    // 3. 盤面全体からアイテムAを2つ配置（スタート・ゴール・壁は避ける）
+    // アイテムAの配置
     let itemsPlaced = 0;
     while (itemsPlaced < 2) {
         let x = Math.floor(Math.random() * GRID_SIZE);
@@ -215,7 +221,6 @@ function initGame() {
         if ((x === startEdge.x && y === startEdge.y) || (x === goalEdge.x && y === goalEdge.y)) {
             continue;
         }
-
         if (grid[y][x].type === 'empty') {
             grid[y][x].type = 'itemA';
             itemsPlaced++;
@@ -226,14 +231,12 @@ function initGame() {
     drawSector();
 }
 
-// UI表示の更新
 function updateUI() {
     document.getElementById('shoot-count').innerText = remainingShoots;
     document.getElementById('sector-indicator').innerText = `セクター: ${currentSectorId + 1}`;
     document.getElementById('shoot-btn').disabled = isGameOver;
 }
 
-// セクターの切り替え
 function changeSector(dir) {
     currentSectorId += dir;
     if (currentSectorId < 0) currentSectorId = 8;
@@ -242,7 +245,6 @@ function changeSector(dir) {
     drawSector();
 }
 
-// 現在のセクターを描画する
 function drawSector() {
     const container = document.getElementById('grid-container');
     container.innerHTML = '';
@@ -268,13 +270,12 @@ function drawSector() {
                 if (isShooting || isGameOver) return; 
                 if (cell.type === 'wall' || cell.type === 'itemA') return; 
 
-                // 鏡を置いた瞬間、前の線を消すルール
                 if (animStep > 0 && !isShooting) {
                     laserPath = [];
                     animStep = 0;
                 }
 
-                cell.mirror = (cell.mirror + 1) % 3; // 0:なし, 1:/, 2:\
+                cell.mirror = (cell.mirror + 1) % 3;
                 drawSector();
             };
             container.appendChild(div);
@@ -283,11 +284,9 @@ function drawSector() {
     drawLaser();
 }
 
-// 光のシミュレーションと反射計算
 function shootLaser() {
     if (isGameOver || isShooting) return;
 
-    // 照射回数を消費
     remainingShoots--;
     updateUI();
 
@@ -296,14 +295,13 @@ function shootLaser() {
     
     let curX = startEdge.x;
     let curY = startEdge.y;
-    let curDir = { ...startEdge.dir };
+    let curDir = startEdge.dir; // インデックス 0〜3
 
-    // 軌跡をシミュレート
     while (true) {
         if (curX < 0 || curX >= 9 || curY < 0 || curY >= 9) break; 
 
         let cell = grid[curY][curX];
-        let step = { x: curX, y: curY, inDir: { ...curDir }, outDir: null, event: null };
+        let step = { x: curX, y: curY, inDir: curDir, outDir: null, event: null };
 
         if (cell.type === 'wall') {
             step.event = 'wall';
@@ -316,23 +314,18 @@ function shootLaser() {
             break;
         }
 
-        // 90度反射の正確な方向計算
-        let nextDir = { ...curDir };
-        if (cell.mirror === 1) { // '/' 鏡
-            nextDir = { dx: -curDir.dy, dy: -curDir.dx };
-        } else if (cell.mirror === 2) { // '\' 鏡
-            nextDir = { dx: curDir.dy, dy: curDir.dx };
-        }
+        // リファレンスコードのロジックで反射計算
+        let nextDir = getReflectedDir(curDir, cell.mirror);
         step.outDir = nextDir;
         laserPath.push(step);
 
         // ゴール判定
         let isGoal = false;
         if (goalEdge.x === curX && goalEdge.y === curY) {
-            if (goalEdge.side === 'top' && nextDir.dy === -1) isGoal = true;
-            if (goalEdge.side === 'bottom' && nextDir.dy === 1) isGoal = true;
-            if (goalEdge.side === 'left' && nextDir.dx === -1) isGoal = true;
-            if (goalEdge.side === 'right' && nextDir.dx === 1) isGoal = true;
+            if (goalEdge.side === 'top' && nextDir === DIR_UP) isGoal = true;
+            if (goalEdge.side === 'bottom' && nextDir === DIR_DOWN) isGoal = true;
+            if (goalEdge.side === 'left' && nextDir === DIR_LEFT) isGoal = true;
+            if (goalEdge.side === 'right' && nextDir === DIR_RIGHT) isGoal = true;
         }
 
         if (isGoal) {
@@ -340,12 +333,12 @@ function shootLaser() {
             break;
         }
 
-        curX += nextDir.dx;
-        curY += nextDir.dy;
+        // 移動
+        curX += DX[nextDir];
+        curY += DY[nextDir];
         curDir = nextDir;
     }
 
-    // アニメーション
     isShooting = true;
     animStep = 0;
     laserInterval = setInterval(() => {
@@ -369,7 +362,6 @@ function shootLaser() {
                     return; 
                 }
                 
-                // 照射終了時点で残り回数が0ならゲームオーバー
                 if (remainingShoots === 0 && lastStep.event !== 'goal') {
                     isGameOver = true;
                     updateUI();
@@ -380,7 +372,6 @@ function shootLaser() {
     }, 200); 
 }
 
-// 光の描画
 function drawLaser() {
     const canvas = document.getElementById('laser-canvas');
     const ctx = canvas.getContext('2d');
@@ -404,14 +395,14 @@ function drawLaser() {
             let cx = (step.x % 3) * CELL_SIZE + CELL_SIZE / 2;
             let cy = (step.y % 3) * CELL_SIZE + CELL_SIZE / 2;
             
-            let inX = cx - step.inDir.dx * CELL_SIZE / 2;
-            let inY = cy - step.inDir.dy * CELL_SIZE / 2;
+            let inX = cx - DX[step.inDir] * CELL_SIZE / 2;
+            let inY = cy - DY[step.inDir] * CELL_SIZE / 2;
             ctx.moveTo(inX, inY);
             ctx.lineTo(cx, cy);
 
-            if (step.outDir && step.event !== 'wall' && step.event !== 'itemA') {
-                let outX = cx + step.outDir.dx * CELL_SIZE / 2;
-                let outY = cy + step.outDir.dy * CELL_SIZE / 2;
+            if (step.outDir !== null && step.event !== 'wall' && step.event !== 'itemA') {
+                let outX = cx + DX[step.outDir] * CELL_SIZE / 2;
+                let outY = cy + DY[step.outDir] * CELL_SIZE / 2;
                 ctx.lineTo(outX, outY);
             }
         }
@@ -419,7 +410,6 @@ function drawLaser() {
     ctx.stroke();
 }
 
-// 初期起動
 initGame();
 </script>
 </body>
