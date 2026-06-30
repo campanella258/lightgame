@@ -1,1184 +1,372 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>格子ミラー 統合（非同期DFS探索 + サンドボックス）</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>光の反射パズル</title>
 <style>
-  :root {
-    --primary-color: #0055cc;
-    --primary-hover: #0044aa;
-    --bg-light: #f8fafc;
-    --border-color: #e2e8f0;
-    --text-color: #334155;
-    --text-muted: #64748b;
-  }
+    body {
+        font-family: sans-serif;
+        text-align: center;
+        background-color: #ffffff;
+        color: #000000;
+        margin-top: 30px;
+    }
+    h1 {
+        font-size: 20px;
+    }
+    #ui-controls {
+        margin-bottom: 20px;
+    }
+    button {
+        padding: 8px 16px;
+        font-size: 16px;
+        cursor: pointer;
+        margin: 0 5px;
+    }
+    #sun-indicator {
+        font-size: 18px;
+        font-weight: bold;
+        display: inline-block;
+        width: 100px;
+    }
+    /* 盤面エリア（3×3マス表示用） */
+    #game-area {
+        position: relative;
+        width: 300px;
+        height: 300px;
+        margin: 0 auto;
+        border: 2px solid #000;
+        background-color: #fff;
+    }
+    #grid-container {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        grid-template-rows: repeat(3, 1fr);
+        width: 100%;
+        height: 100%;
+    }
+    .cell {
+        border: 1px solid #000;
+        box-sizing: border-box;
+        position: relative;
+        cursor: pointer;
+    }
+    /* 壁 */
+    .wall {
+        background-color: #000;
+        cursor: not-allowed;
+    }
+    /* アイテムA */
+    .item-a::before {
+        content: '';
+        position: absolute;
+        width: 60%;
+        height: 60%;
+        border: 3px solid #000;
+        border-radius: 50%;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        box-sizing: border-box;
+    }
+    /* 鏡 (/) */
+    .mirror-1 {
+        background-image: linear-gradient(to top right, transparent calc(50% - 2px), black calc(50% - 2px), black calc(50% + 2px), transparent calc(50% + 2px));
+    }
+    /* 鏡 (\) */
+    .mirror-2 {
+        background-image: linear-gradient(to bottom right, transparent calc(50% - 2px), black calc(50% - 2px), black calc(50% + 2px), transparent calc(50% + 2px));
+    }
+    /* スタート（青）とゴール（赤）の辺 */
+    .start-top { box-shadow: inset 0 8px 0 blue; }
+    .start-bottom { box-shadow: inset 0 -8px 0 blue; }
+    .start-left { box-shadow: inset 8px 0 0 blue; }
+    .start-right { box-shadow: inset -8px 0 0 blue; }
 
-  body {
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
-    padding: 24px;
-    background-color: #f1f5f9;
-    color: var(--text-color);
-    margin: 0;
-  }
+    .goal-top { box-shadow: inset 0 8px 0 red; }
+    .goal-bottom { box-shadow: inset 0 -8px 0 red; }
+    .goal-left { box-shadow: inset 8px 0 0 red; }
+    .goal-right { box-shadow: inset -8px 0 0 red; }
 
-  h2 {
-    margin-top: 0;
-    color: #1e293b;
-    font-size: 1.4rem;
-    margin-bottom: 20px;
-  }
-
-  .tabs {
-    display: flex;
-    gap: 6px;
-    margin-bottom: -1px;
-    position: relative;
-    z-index: 2;
-  }
-
-  .tab {
-    padding: 10px 18px;
-    border: 1px solid var(--border-color);
-    border-bottom: none;
-    border-radius: 8px 8px 0 0;
-    cursor: pointer;
-    background: #e2e8f0;
-    color: var(--text-muted);
-    font-weight: 500;
-    transition: all 0.2s;
-    font-size: 0.95rem;
-  }
-
-  .tab.active {
-    background: #fff;
-    color: var(--primary-color);
-    font-weight: bold;
-    border-bottom: 1px solid #fff;
-  }
-
-  .panel-wrap {
-    border: 1px solid var(--border-color);
-    border-radius: 0 8px 8px 8px;
-    padding: 20px;
-    background: #fff;
-    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
-  }
-
-  .section {
-    display: none;
-  }
-
-  .section.active {
-    display: block;
-  }
-
-  /* 2カラムレイアウト構造 */
-  .two-column {
-    display: flex;
-    gap: 24px;
-    align-items: flex-start;
-  }
-
-  .main-area {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .main-area h3 {
-    margin-top: 0;
-    font-size: 1.1rem;
-    color: #1e293b;
-    margin-bottom: 12px;
-  }
-
-  .side-panel {
-    width: 320px;
-    flex-shrink: 0;
-    background: var(--bg-light);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-
-  /* パネル内グループコンテナ */
-  .control-group, .stat-group, .instruction {
-    background: #fff;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 14px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-  }
-
-  .control-group h4, .stat-group h4 {
-    margin: 0 0 12px 0;
-    font-size: 0.9rem;
-    color: #1e293b;
-    border-left: 3px solid var(--primary-color);
-    padding-left: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .control-group label {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-    font-size: 0.85rem;
-    font-weight: 500;
-  }
-
-  .control-group label:last-child {
-    margin-bottom: 0;
-  }
-
-  .control-group input[type="number"], .control-group select {
-    width: 90px;
-    padding: 5px 8px;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    font-size: 0.85rem;
-    color: var(--text-color);
-    background-color: #fff;
-  }
-
-  .control-group input[type="range"] {
-    flex: 1;
-    margin: 0 8px;
-  }
-
-  .checkbox-label {
-    justify-content: flex-start !important;
-    gap: 8px;
-    cursor: pointer;
-    user-select: none;
-  }
-
-  /* ボタン */
-  .btn-row {
-    display: flex;
-    gap: 8px;
-    margin-top: 12px;
-  }
-
-  button {
-    padding: 9px 16px;
-    border-radius: 6px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    font-size: 0.85rem;
-    border: 1px solid transparent;
-    width: 100%;
-    text-align: center;
-  }
-
-  .btn-primary {
-    background: var(--primary-color);
-    color: #fff;
-  }
-
-  .btn-primary:hover {
-    background: var(--primary-hover);
-  }
-
-  .btn-secondary {
-    background: #fff;
-    border-color: var(--border-color);
-    color: var(--text-color);
-  }
-
-  .btn-secondary:hover {
-    background: #f1f5f9;
-    border-color: #cbd5e1;
-  }
-
-  /* サンドボックス盤面ラップ */
-  #boardWrap {
-    display: flex;
-    justify-content: center;
-    background: var(--bg-light);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 16px;
-  }
-
-  svg {
-    background: #fff;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-    display: block;
-  }
-
-  /* 探索モード結果一覧 */
-  #exp_thumbs {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 12px;
-    max-height: 640px;
-    overflow-y: auto;
-    padding: 8px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    background: var(--bg-light);
-  }
-
-  .thumb {
-    background: #fff;
-    border: 1px solid var(--border-color);
-    padding: 8px;
-    border-radius: 6px;
-    transition: all 0.2s;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.02);
-  }
-
-  .thumb:hover {
-    box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-    transform: translateY(-1px);
-    border-color: #cbd5e1;
-  }
-
-  .thumb canvas {
-    border: 1px solid #f1f5f9;
-    border-radius: 4px;
-    background: #fff;
-  }
-
-  .small {
-    font-size: 0.8rem;
-    color: var(--text-color);
-    line-height: 1.4;
-  }
-
-  .small-muted {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    margin-top: 4px;
-    display: inline-block;
-  }
-
-  /* 鏡統計内訳 */
-  .stats-board {
-    margin-top: 10px;
-    padding: 10px;
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    border-radius: 6px;
-    font-size: 0.8rem;
-  }
-
-  .stats-tags {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    margin-top: 8px;
-  }
-
-  .stats-tag {
-    background: #fff;
-    border: 1px solid #bfdbfe;
-    padding: 6px 10px;
-    border-radius: 5px;
-    color: var(--primary-color);
-    cursor: pointer;
-    transition: all 0.15s;
-    user-select: none;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .stats-tag:hover {
-    background: #dbeafe;
-  }
-
-  .stats-tag.active {
-    background: var(--primary-color);
-    color: #fff;
-    border-color: var(--primary-color);
-    font-weight: bold;
-  }
-
-  /* 凡例・アコーディオン */
-  .legend-item {
-    display: flex;
-    align-items: center;
-    margin-bottom: 6px;
-    font-size: 0.8rem;
-  }
-
-  .legend-item:last-child {
-    margin-bottom: 0;
-  }
-
-  .swatch {
-    width: 16px;
-    height: 12px;
-    margin-right: 8px;
-    border-radius: 2px;
-  }
-
-  details {
-    background: #fff;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 10px;
-    font-size: 0.8rem;
-  }
-
-  details summary {
-    cursor: pointer;
-    font-weight: bold;
-    color: var(--text-color);
-    user-select: none;
-  }
-
-  details p {
-    margin: 8px 0 0 0;
-    color: var(--text-muted);
-    line-height: 1.4;
-  }
+    /* 光の描画用キャンバス */
+    #laser-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        pointer-events: none; /* クリックを下のマスに貫通させる */
+    }
 </style>
 </head>
 <body>
-  <h2>格子ミラー — 統合システム</h2>
 
-  <div class="tabs">
-    <div class="tab active" data-target="explorer">探索モード (Explorer)</div>
-    <div class="tab" data-target="sandbox">サンドボックス (Sandbox)</div>
-  </div>
+<h1>光の反射パズル</h1>
+<div id="ui-controls">
+    <button onclick="changeSun(-1)">前に戻る</button>
+    <span id="sun-indicator">サン: 1</span>
+    <button onclick="changeSun(1)">次に行く</button>
+    <br><br>
+    <button onclick="shootLaser()">照射 / 再照射</button>
+</div>
 
-  <div class="panel-wrap">
-    <div id="explorer" class="section active">
-      <div class="two-column">
-        <div class="main-area">
-          <h3>有効パターン一覧 — 上限200</h3>
-          <div id="exp_thumbs"></div>
-        </div>
-        <div class="side-panel">
-          <details>
-            <summary>🔍 パラメータの説明</summary>
-            <p><b>完全探索（非同期DFS）：</b> 光線追跡型の深さ優先探索により全 canonical パターンを割り出します。画面がフリーズしません。</p>
-            <p><b>近似：</b> ランダム/ハイブリッドでサンプリングして異なる経路数から推定します。</p>
-          </details>
-
-          <div class="control-group">
-            <h4>グリッドサイズ</h4>
-            <label>W(幅/列): <input id="exp_colsInput" type="number" min="1" max="15" value="4"></label>
-            <label>H(高さ/行): <input id="exp_rowsInput" type="number" min="1" max="15" value="4"></label>
-          </div>
-
-          <div class="control-group">
-            <h4>探索設定</h4>
-            <label>入射位置（下）: <select id="exp_inputSelect"></select></label>
-            <label>探索モード:
-              <select id="exp_modeSelect">
-                <option value="standard">標準近似</option>
-                <option value="hybrid">改良（長経路優先）</option>
-              </select>
-            </label>
-            <label>サンプル数: <input id="exp_samplesInput" type="number" value="20000" min="1000" step="1000"></label>
-            <label>深さ制限: <input id="exp_depthInput" type="number" value="200" min="1" step="1"></label>
-            <label class="checkbox-label"><input id="exp_forceExact" type="checkbox"> 強制: 完全探索</label>
-            <button id="exp_runBtn" class="btn-primary">探索開始</button>
-            <span id="exp_progress" class="small-muted"></span>
-          </div>
-
-          <div class="stat-group">
-            <h4>結果サマリー</h4>
-            <div id="exp_resultSummary" class="small">---</div>
-            <div id="exp_mirrorStats" class="stats-board" style="display:none;"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div id="sandbox" class="section">
-      <div class="two-column">
-        <div class="main-area">
-          <div id="boardWrap"></div>
-        </div>
-        <div class="side-panel">
-          <div class="control-group">
-            <h4>グリッド・シミュレーション</h4>
-            <label>W(幅/列): <input id="sb_colsInput" type="number" min="1" value="4"></label>
-            <label>H(高さ/行): <input id="sb_rowsInput" type="number" min="1" value="4"></label>
-            <label>シミュレーション:
-              <select id="sb_simMode">
-                <option value="down">下 → 右</option>
-                <option value="left">左 → 上</option>
-                <option value="both">両方（同時）</option>
-              </select>
-            </label>
-            <label>アニメ速度: 
-              <input id="sb_speedSlider" type="range" min="0.1" max="5.0" step="0.1" value="1.5">
-              <span id="sb_speedDisp" class="small">1.5s</span>
-            </label>
-            <div class="btn-row">
-              <button id="sb_simulateBtn" class="btn-primary">光を追跡</button>
-              <button id="sb_resetBtn" class="btn-secondary">リセット</button>
-            </div>
-          </div>
-
-          <div class="instruction small">
-            <b>操作方法</b><br>
-            ・セルをクリック：鏡を配置／切替。<br>
-            ・外周の二重円をクリック：光線ピンの追加／削除。
-          </div>
-
-          <div class="stat-group">
-            <h4>統計情報</h4>
-            <div id="statContent" class="small">まだシミュレーションしていません。</div>
-          </div>
-
-          <div class="stat-group">
-            <h4>対応（入口 → 出口）</h4>
-            <div id="mappingContent" class="small">-</div>
-          </div>
-
-          <div class="stat-group">
-            <h4>凡例</h4>
-            <div id="legend"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+<div id="game-area">
+    <div id="grid-container"></div>
+    <canvas id="laser-canvas" width="300" height="300"></canvas>
+</div>
 
 <script>
-/* =========================
-   共通ユーティリティ
-   ========================= */
-const COLORS = ['#e6194b','#3cb44b','#4363d8','#f58231','#911eb4','#46f0f0','#f032e6','#bcf60c','#fabebe','#008080','#e6beff','#9A6324','#fffac8','#800000','#aaffc3','#808000','#ffd8b1','#000075','#808080','#ffffff'];
-function reflect(dir, mirror){
-  if(mirror===0) return dir;
-  if(mirror===1) return [1,0,3,2][dir];
-  if(mirror===2) return [3,2,1,0][dir];
-  return dir;
-}
-function stepCell(r,c,dir){ return [[r-1,c],[r,c+1],[r+1,c],[r,c-1]][dir]; }
-const cfgToKey = cfg => cfg.join(',');
+const GRID_SIZE = 9;
+const SUN_SIZE = 3;
+let grid = [];
 
-/* =========================
-   探索モード (Explorer)
-   ========================= */
-const EXP = (function(){
-  const colsInput = document.getElementById('exp_colsInput');
-  const rowsInput = document.getElementById('exp_rowsInput');
-  const inputSelect = document.getElementById('exp_inputSelect');
-  const runBtn = document.getElementById('exp_runBtn');
-  const modeSelect = document.getElementById('exp_modeSelect');
-  const samplesInput = document.getElementById('exp_samplesInput');
-  const depthInput = document.getElementById('exp_depthInput');
-  const forceExact = document.getElementById('exp_forceExact');
-  const resultSummary = document.getElementById('exp_resultSummary');
-  const mirrorStats = document.getElementById('exp_mirrorStats');
-  const thumbs = document.getElementById('exp_thumbs');
-  const progressSpan = document.getElementById('exp_progress');
+// 状態管理
+let currentSunId = 0; // 0〜8
+let startEdge = null;
+let goalEdge = null;
 
-  let currentRenderId = 0;
+let isShooting = false;
+let laserPath = [];
+let animStep = 0;
+let laserInterval = null;
 
-  function simulate_local(R, C, mirrorConfig, startInput){
-    let r=R-1, c=startInput, dir=0; const path=[];
-    const MAX_STEPS = 10000;
-    for(let steps=0; steps<MAX_STEPS; steps++){
-      if(r<0||r>=R||c<0||c>=C){
-        if(c===C && r>=0 && r<R) return {exited:true, exitSide:'R', exitRow:r, path};
-        return {exited:false, exitSide:'other', exitRow:null, path};
-      }
-      path.push([r,c]);
-      const idx = r*C + c;
-      dir = reflect(dir, mirrorConfig[idx]);
-      [r,c] = stepCell(r,c,dir);
-    }
-    return {exited:false, exitSide:'other', exitRow:null, path};
-  }
-
-  function canonicalizeConfig(R, C, cfg, path){
-    const newCfg = cfg.slice();
-    const visited = new Set(path.map(([r,c])=> r+','+c));
-    for(let r=0;r<R;r++) for(let c=0;c<C;c++) if(!visited.has(r+','+c)) newCfg[r*C+c]=0;
-    return newCfg;
-  }
-
-  async function dfsEnumerateAsync(R, C, startInput, progressCb) {
-    let totalCount = 0; 
-    let longest = 0;
-    let best = null;
-    let counter = 0;
-    const MAX_PER_MCOUNT = 200;
-    const savedByMCount = {};
-    const grid = new Array(R * C).fill(-1);
-    const history = new Uint8Array(R * C * 4); 
-    const currentPath = [];
-    const mStats = {}; 
-
-    function* exploreGen(r, c, dir) {
-      if (++counter % 100000 === 0) yield counter;
-
-      if (r < 0 || r >= R || c < 0 || c >= C) {
-        if (c === C && r >= 0 && r < R) {
-          totalCount++;
-          
-          let mCount = 0;
-          for(let i=0; i<grid.length; i++){
-            if(grid[i] === 1 || grid[i] === 2) mCount++;
-          }
-          mStats[mCount] = (mStats[mCount] || 0) + 1;
-
-          const pathLen = currentPath.length;
-          if (pathLen > longest) {
-            longest = pathLen;
-            const canon = grid.map(v => v === -1 ? 0 : v);
-            best = { cfg: canon, path: currentPath.slice(), exitRow: r };
-          }
-          
-          if (!savedByMCount[mCount]) savedByMCount[mCount] = [];
-          if (savedByMCount[mCount].length < MAX_PER_MCOUNT) {
-            const canon = grid.map(v => v === -1 ? 0 : v);
-            savedByMCount[mCount].push({ cfg: canon, path: currentPath.slice(), exitRow: r });
-          }
+// ゲーム初期化処理
+function initGame() {
+    // 9x9の盤面を初期化
+    for (let y = 0; y < GRID_SIZE; y++) {
+        grid[y] = [];
+        for (let x = 0; x < GRID_SIZE; x++) {
+            grid[y][x] = { type: 'empty', mirror: 0 };
         }
-        return;
-      }
-
-      const stateIdx = (r * C + c) * 4 + dir;
-      if (history[stateIdx] === 1) return;
-      history[stateIdx] = 1;
-      currentPath.push([r, c]);
-
-      const cellIdx = r * C + c;
-      const currentMirror = grid[cellIdx];
-
-      if (currentMirror !== -1) {
-        const nDir = reflect(dir, currentMirror);
-        const [nr, nc] = stepCell(r, c, nDir);
-        yield* exploreGen(nr, nc, nDir);
-      } else {
-        for (let m = 0; m <= 2; m++) {
-          grid[cellIdx] = m;
-          const nDir = reflect(dir, m);
-          const [nr, nc] = stepCell(r, c, nDir);
-          yield* exploreGen(nr, nc, nDir);
-          grid[cellIdx] = -1; 
-        }
-      }
-      currentPath.pop();
-      history[stateIdx] = 0;
     }
 
-    const gen = exploreGen(R - 1, startInput, 0);
+    // 1. 各サンに壁を2つ配置
+    for (let sy = 0; sy < 3; sy++) {
+        for (let sx = 0; sx < 3; sx++) {
+            let wallsPlaced = 0;
+            while (wallsPlaced < 2) {
+                let dx = Math.floor(Math.random() * 3);
+                let dy = Math.floor(Math.random() * 3);
+                let x = sx * 3 + dx;
+                let y = sy * 3 + dy;
+                if (grid[y][x].type === 'empty') {
+                    grid[y][x].type = 'wall';
+                    wallsPlaced++;
+                }
+            }
+        }
+    }
+
+    // 2. 盤面全体からアイテムAを2つ配置
+    let itemsPlaced = 0;
+    while (itemsPlaced < 2) {
+        let x = Math.floor(Math.random() * GRID_SIZE);
+        let y = Math.floor(Math.random() * GRID_SIZE);
+        if (grid[y][x].type === 'empty') {
+            grid[y][x].type = 'itemA';
+            itemsPlaced++;
+        }
+    }
+
+    // 3. スタートとゴールの配置（外周の辺のみ）
+    let edges = [];
+    for (let x = 0; x < 9; x++) edges.push({ x: x, y: 0, side: 'top', dir: { dx: 0, dy: 1 }, sunId: Math.floor(x / 3) });
+    for (let x = 0; x < 9; x++) edges.push({ x: x, y: 8, side: 'bottom', dir: { dx: 0, dy: -1 }, sunId: 6 + Math.floor(x / 3) });
+    for (let y = 0; y < 9; y++) edges.push({ x: 0, y: y, side: 'left', dir: { dx: 1, dy: 0 }, sunId: Math.floor(y / 3) * 3 });
+    for (let y = 0; y < 9; y++) edges.push({ x: 8, y: y, side: 'right', dir: { dx: -1, dy: 0 }, sunId: Math.floor(y / 3) * 3 + 2 });
+
+    startEdge = edges[Math.floor(Math.random() * edges.length)];
     while (true) {
-      const res = gen.next();
-      if (res.done) break;
-      if (progressCb) progressCb(res.value);
-      await new Promise(resolve => setTimeout(resolve, 0));
-    }
-
-    const patterns = [];
-    for (const k in savedByMCount) {
-      patterns.push(...savedByMCount[k]);
-    }
-
-    if (best) {
-      const bestKey = cfgToKey(best.cfg);
-      const idx = patterns.findIndex(p => cfgToKey(p.cfg) === bestKey);
-      if (idx > 0) {
-        const p = patterns.splice(idx, 1)[0];
-        patterns.unshift(p);
-      } else if (idx === -1) {
-        patterns.unshift(best);
-      }
-    }
-    return { count: totalCount, patterns, longest, mStats };
-  }
-
-  async function approximateEnumerate(R, C, startInput, depthLimit, maxSamples, isHybrid, progressCb){
-    if(R * C <= 25) {
-      return await dfsEnumerateAsync(R, C, startInput, (count) => {
-        if (progressCb) progressCb(count, "DFS");
-      });
-    }
-    const seenByMCount = {};
-    const MAX_PER_MCOUNT = 200;
-    const globalMStatsRaw = {};
-    
-    let longest = 0, best = null;
-    let current = new Array(R*C).fill(0);
-    
-    for(let s=0; s<maxSamples; s++){
-      const cfg = isHybrid ? current.slice() : new Array(R*C).fill(0);
-      for(let d=0; d<depthLimit; d++){
-        cfg[Math.floor(Math.random()*R*C)] = Math.floor(Math.random()*3);
-      }
-      const res = simulate_local(R, C, cfg, startInput);
-      if(res.exited && res.exitSide==='R'){
-        const canon = canonicalizeConfig(R, C, cfg, res.path);
-        const mCount = canon.filter(m => m !== 0).length;
-        globalMStatsRaw[mCount] = (globalMStatsRaw[mCount] || 0) + 1;
-        
-        const key = cfgToKey(canon);
-        if(!seenByMCount[mCount]) seenByMCount[mCount] = new Map();
-        const seen = seenByMCount[mCount];
-        
-        if(!seen.has(key)){
-          if(seen.size < MAX_PER_MCOUNT){
-            seen.set(key, { cfg: canon, path: res.path.length>200 ? res.path.slice(0,200) : res.path.slice(), exitRow: res.exitRow });
-          } else if(Math.random() < 0.01){
-            const keys = Array.from(seen.keys());
-            const rem = keys[Math.floor(Math.random()*keys.length)];
-            seen.delete(rem);
-            seen.set(key, { cfg: canon, path: res.path.length>200 ? res.path.slice(0,200) : res.path.slice(), exitRow: res.exitRow });
-          }
+        let candidate = edges[Math.floor(Math.random() * edges.length)];
+        if (candidate.sunId !== startEdge.sunId) {
+            goalEdge = candidate;
+            break;
         }
-        if(res.path.length > longest){
-          longest = res.path.length;
-          best = { cfg: canon.slice(), path: res.path.slice(), exitRow: res.exitRow };
-          if(isHybrid) current = canon.slice();
+    }
+
+    drawSun();
+}
+
+// サンの切り替え
+function changeSun(dir) {
+    currentSunId += dir;
+    if (currentSunId < 0) currentSunId = 8;
+    if (currentSunId > 8) currentSunId = 0;
+    document.getElementById('sun-indicator').innerText = `サン: ${currentSunId + 1}`;
+    drawSun();
+}
+
+// 現在のサンを描画する
+function drawSun() {
+    const container = document.getElementById('grid-container');
+    container.innerHTML = '';
+
+    let sy = Math.floor(currentSunId / 3);
+    let sx = currentSunId % 3;
+
+    for (let y = sy * 3; y < sy * 3 + 3; y++) {
+        for (let x = sx * 3; x < sx * 3 + 3; x++) {
+            let cell = grid[y][x];
+            let div = document.createElement('div');
+            div.className = 'cell';
+
+            if (cell.type === 'wall') div.classList.add('wall');
+            if (cell.type === 'itemA') div.classList.add('item-a');
+            if (cell.mirror === 1) div.classList.add('mirror-1');
+            if (cell.mirror === 2) div.classList.add('mirror-2');
+
+            // スタートとゴールの辺を描画
+            if (startEdge.x === x && startEdge.y === y) div.classList.add('start-' + startEdge.side);
+            if (goalEdge.x === x && goalEdge.y === y) div.classList.add('goal-' + goalEdge.side);
+
+            // マスクリックで鏡を配置
+            div.onclick = () => {
+                if (isShooting) return; // 照射中は操作不可
+                if (cell.type === 'wall' || cell.type === 'itemA') return; // 壁やアイテムには置けない
+
+                // 照射終了後に鏡を操作したら前回のレーザーを消す
+                if (animStep > 0 && !isShooting) {
+                    laserPath = [];
+                    animStep = 0;
+                }
+
+                cell.mirror = (cell.mirror + 1) % 3; // 0: なし, 1: /, 2: \
+                drawSun();
+            };
+            container.appendChild(div);
         }
-      }
-      if(progressCb && s % Math.max(1, Math.floor(maxSamples/100)) === 0){
-        progressCb(s+1, maxSamples);
-      }
-      if(s % 2000 === 0) await new Promise(r=>setTimeout(r,0));
     }
-    if(progressCb) progressCb(maxSamples, maxSamples);
+    drawLaser();
+}
+
+// 光のシミュレーション計算とアニメーション開始
+function shootLaser() {
+    if (laserInterval) clearInterval(laserInterval);
+    laserPath = [];
     
-    const total = Math.pow(3, R*C);
-    const factor = total / Math.max(1, maxSamples);
-    
-    const mStats = {};
-    let finalEstimatedCount = 0;
-    for(const k in globalMStatsRaw){
-      mStats[k] = Math.round(globalMStatsRaw[k] * factor);
-      finalEstimatedCount += mStats[k];
-    }
+    let curX = startEdge.x;
+    let curY = startEdge.y;
+    let curDir = { ...startEdge.dir };
 
-    const patterns = [];
-    for(const k in seenByMCount) {
-      patterns.push(...seenByMCount[k].values());
-    }
+    // 光の軌跡を事前計算
+    while (true) {
+        if (curX < 0 || curX >= 9 || curY < 0 || curY >= 9) break; // 盤面外
 
-    if(best){
-      const bestKey = cfgToKey(best.cfg);
-      const idx = patterns.findIndex(p=>cfgToKey(p.cfg)===bestKey);
-      if(idx>0){ const p = patterns.splice(idx,1)[0]; patterns.unshift(p); }
-      else if(idx===-1) patterns.unshift(best);
-    }
-    return { estimatedCount: finalEstimatedCount, patterns, longest, mStats };
-  }
+        let cell = grid[curY][curX];
+        let step = { x: curX, y: curY, inDir: curDir, outDir: null, event: null };
+        laserPath.push(step);
 
-  runBtn.addEventListener('click', async ()=>{
-    const C = parseInt(colsInput.value,10);
-    const R = parseInt(rowsInput.value,10);
-    const mode = modeSelect.value;
-    const inputVal = inputSelect.value;
-    const maxSamples = parseInt(samplesInput.value,10);
-    const depthLimit = parseInt(depthInput.value,10);
-    const isHybrid = (mode==='hybrid');
-    const preferExact = forceExact.checked;
-    const autoExact = (R * C) <= 25;
-    const doExact = preferExact || autoExact;
-
-    currentRenderId++;
-    
-    thumbs.innerHTML=''; progressSpan.textContent='';
-    mirrorStats.style.display = 'none'; mirrorStats.innerHTML = '';
-
-    if(doExact && (R * C) >= 36){
-      if(!confirm(`完全探索を選択しています。\nサイズ ${C}x${R} の完全探索は計算量が膨大になり、お使いの環境によっては時間がかかる可能性があります。続行しますか？`)){
-        resultSummary.textContent='キャンセルされました。';
-        return;
-      }
-    }
-
-    resultSummary.textContent = doExact ? '完全探索中...' : '探索中...';
-    let combined = [], totalCount = 0, overallLongest = 0;
-    let globalMStats = {};
-
-    const inputs = (inputVal === 'all') ? [...Array(C).keys()] : [parseInt(inputVal,10)];
-
-    for(let sIdx=0; sIdx<inputs.length; sIdx++){
-      const s = inputs[sIdx];
-      progressSpan.textContent = `入力 ${s+1} を計算中...`;
-      await new Promise(r => setTimeout(r, 10));
-
-      let res;
-      if(doExact){
-        res = await dfsEnumerateAsync(R, C, s, (nodesCount) => {
-          progressSpan.textContent = `入力 ${s+1} 計算中... (${nodesCount.toLocaleString()}ノード)`;
-        });
-        totalCount += res.count;
-        for(const k in res.mStats) globalMStats[k] = (globalMStats[k] || 0) + res.mStats[k];
-      } else {
-        res = await approximateEnumerate(R, C, s, depthLimit, maxSamples, isHybrid, (done, total)=> {
-          if (total === "DFS") {
-            progressSpan.textContent = `入力 ${s+1} 計算中... (${done.toLocaleString()}ノード)`;
-          } else {
-            progressSpan.textContent = `入力 ${s+1}: ${Math.round((done/total)*100)}%`;
-          }
-        });
-        totalCount += (res.estimatedCount ?? 0);
-        for(const k in res.mStats) globalMStats[k] = (globalMStats[k] || 0) + res.mStats[k];
-      }
-      if(res.longest > overallLongest) overallLongest = res.longest ?? 0;
-      res.patterns.forEach(p => combined.push(Object.assign({inputIndex: s}, p)));
-    }
-
-    progressSpan.textContent = '';
-    resultSummary.innerHTML = `<b>結果（${doExact ? '完全探索' : 'サンプリング近似'}）</b><br>` +
-      (doExact ? `パターン数: <strong>${totalCount}</strong>` : `推定パターン数: 約${totalCount}`) +
-      `<br>最長経路マス数: ${overallLongest}`;
-
-    const uniqMap = new Map();
-    combined.forEach(p => {
-      const k = cfgToKey(p.cfg);
-      if(!uniqMap.has(k)) uniqMap.set(k, p);
-    });
-    const renderPatterns = Array.from(uniqMap.values());
-
-    let statsHtml = `<b>💡 鏡の枚数ごとの内訳</b><br>`;
-    mirrorStats.innerHTML = statsHtml;
-    
-    const tagsContainer = document.createElement('div');
-    tagsContainer.className = 'stats-tags';
-
-    const allBtn = document.createElement('span');
-    allBtn.className = 'stats-tag active';
-    allBtn.innerHTML = `<span>すべて表示</span> <b>${renderPatterns.length}</b>`;
-    allBtn.addEventListener('click', () => {
-      tagsContainer.querySelectorAll('.stats-tag').forEach(t => t.classList.remove('active'));
-      allBtn.classList.add('active');
-      renderThumbs(renderPatterns, R, C);
-    });
-    tagsContainer.appendChild(allBtn);
-
-    const sortedKeys = Object.keys(globalMStats).map(Number).sort((a,b)=>a-b);
-    sortedKeys.forEach(k => {
-      const btn = document.createElement('span');
-      btn.className = 'stats-tag';
-      const actualCount = renderPatterns.filter(p => p.cfg.filter(m => m !== 0).length === k).length;
-      btn.innerHTML = `<span>鏡 ${k} 枚</span> <b>${globalMStats[k]}</b>`;
-      
-      btn.addEventListener('click', () => {
-        tagsContainer.querySelectorAll('.stats-tag').forEach(t => t.classList.remove('active'));
-        btn.classList.add('active');
-        const filtered = renderPatterns.filter(p => p.cfg.filter(m => m !== 0).length === k);
-        renderThumbs(filtered, R, C);
-      });
-      tagsContainer.appendChild(btn);
-    });
-    
-    mirrorStats.appendChild(tagsContainer);
-    mirrorStats.style.display = 'block';
-
-    renderThumbs(renderPatterns, R, C);
-  });
-
-  function updateInputOptions(){
-    const C = parseInt(colsInput.value,10);
-    inputSelect.innerHTML='';
-    const optAll = document.createElement('option'); optAll.value='all'; optAll.textContent='全体'; inputSelect.appendChild(optAll);
-    for(let i=0;i<C;i++){ const o=document.createElement('option'); o.value=i; o.textContent='入力 '+(i+1); inputSelect.appendChild(o); }
-  }
-  updateInputOptions();
-  colsInput.addEventListener('change', updateInputOptions);
-  rowsInput.addEventListener('change', updateInputOptions);
-
-  function renderThumbs(patterns, R, C){
-    const renderId = ++currentRenderId;
-    thumbs.innerHTML='';
-    if(!patterns || patterns.length===0){ thumbs.textContent='パターンはありません。'; return; }
-    
-    const list = patterns.slice(); 
-    const maxLen = Math.max(...list.map(p=>p.path.length));
-    const longestIndex = list.findIndex(p=>p.path.length===maxLen);
-    if(longestIndex > 0){ const [lp] = list.splice(longestIndex,1); list.unshift(lp); }
-    const showCount = Math.min(200, list.length);
-    const finalList = list.slice(0, showCount);
-    let i=0; const batchSize=8; const startTime = performance.now(); const maxAllowed=2000;
-    
-    async function drawBatch(){
-      if (renderId !== currentRenderId) return;
-
-      for(let b=0; b<batchSize && i<finalList.length; b++, i++){
-        const item = finalList[i];
-        const mCount = item.cfg.filter(m => m !== 0).length;
-        const div = document.createElement('div'); div.className='thumb';
-        const canvas = document.createElement('canvas'); canvas.width=100; canvas.height=100; div.appendChild(canvas);
-        const info = document.createElement('div'); info.className='small';
-        info.style.fontSize = '0.75rem';
-        info.innerHTML = `入${ (item.inputIndex!=null ? (item.inputIndex+1)+'→' : '') }出${String.fromCharCode(65 + (item.exitRow ?? 0))}<br>鏡:${mCount} / 長:${item.path.length}${item.path.length===maxLen ? '⭐' : ''}`;
-        div.appendChild(info);
-        thumbs.appendChild(div);
-        
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#fff'; ctx.fillRect(0,0,100,100);
-        ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth=0.5;
-        
-        const maxDim = Math.max(R, C, 1);
-        const cell = 100 / maxDim;
-        const offsetX = (100 - C * cell) / 2;
-        const offsetY = (100 - R * cell) / 2;
-
-        ctx.translate(offsetX, offsetY);
-
-        for(let r=0;r<R;r++) for(let c=0;c<C;c++){
-          const m = item.cfg[r*C+c];
-          if(m===1||m===2){
-            ctx.beginPath();
-            if(m===1){ ctx.moveTo((c+1)*cell-2, r*cell+2); ctx.lineTo(c*cell+2, (r+1)*cell-2); }
-            else { ctx.moveTo(c*cell+2, r*cell+2); ctx.lineTo((c+1)*cell-2, (r+1)*cell-2); }
-            ctx.strokeStyle='#334155'; ctx.lineWidth=1.5; ctx.stroke();
-          }
+        if (cell.type === 'wall') {
+            step.event = 'wall';
+            break;
         }
-        ctx.strokeStyle='#e11d48'; ctx.lineWidth=1.5; ctx.beginPath();
-        const step = Math.max(1, Math.floor(item.path.length / 100));
-        let moved=false;
-        item.path.forEach(([r,c], idx)=>{ if(idx%step!==0) return; const x=c*cell+cell/2, y=r*cell+cell/2; if(!moved){ctx.moveTo(x,y); moved=true;} else ctx.lineTo(x,y); });
-        ctx.stroke();
-        
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-      }
-      if(performance.now() - startTime > maxAllowed){
-        thumbs.innerHTML += '<br><span class="small-muted">⚠️ 負荷軽減のため以降の描画を省略しました。</span>';
-        return;
-      }
-      if(i < finalList.length){
-        await new Promise(res=>setTimeout(res,12));
-        requestAnimationFrame(drawBatch);
-      }
-    }
-    drawBatch();
-  }
-
-  return { dfsEnumerateAsync, approximateEnumerate };
-})();
-
-/* =========================
-   サンドボックスモード (Sandbox)
-   ========================= */
-const SB = (function(){
-  const colsInput = document.getElementById('sb_colsInput');
-  const rowsInput = document.getElementById('sb_rowsInput');
-  const simMode = document.getElementById('sb_simMode');
-  const simulateBtn = document.getElementById('sb_simulateBtn');
-  const resetBtn = document.getElementById('sb_resetBtn');
-  const boardWrap = document.getElementById('boardWrap');
-  const statsBox = document.getElementById('statContent');
-  const mappingContent = document.getElementById('mappingContent');
-  const legendDiv = document.getElementById('legend');
-  const speedSlider = document.getElementById('sb_speedSlider');
-  const speedDisp = document.getElementById('sb_speedDisp');
-  
-  if(speedSlider && speedDisp){
-    speedSlider.addEventListener('input', () => {
-      speedDisp.textContent = Number(speedSlider.value).toFixed(1) + 's';
-    });
-  }
-
-  let R = 4, C = 4, cfg = [], inputsBottom = [], inputsLeft = [];
-  let animTimeouts = []; 
-
-  function simulateSingle(R, C, cfg, startR, startC, startDir){
-    let r=startR, c=startC, dir=startDir;
-    const path = [];
-    const MAX_STEPS = 10000;
-    for(let i=0;i<MAX_STEPS;i++){
-      if(r<0||r>=R||c<0||c>=C){
-        if(c===C) return {exited:true, exitSide:'R', exitIndex:r, path};
-        if(c===-1) return {exited:true, exitSide:'L', exitIndex:r, path};
-        if(r===-1) return {exited:true, exitSide:'U', exitIndex:c, path};
-        if(r===R) return {exited:true, exitSide:'D', exitIndex:c, path};
-        return {exited:false, path};
-      }
-      path.push([r,c]);
-      const idx = r*C + c;
-      dir = reflect(dir, cfg[idx]);
-      [r,c] = stepCell(r,c,dir);
-    }
-    return {exited:false, path};
-  }
-
-  function initState(){
-    R = Math.max(1, parseInt(rowsInput.value) || 4);
-    C = Math.max(1, parseInt(colsInput.value) || 4);
-    cfg = new Array(R*C).fill(0);
-    inputsBottom = new Array(C).fill(false);
-    inputsLeft = new Array(R).fill(false);
-    renderBoard();
-    renderLegend();
-    statsBox.textContent = 'まだシミュレーションしていません。';
-    mappingContent.textContent = '-';
-  }
-  colsInput.addEventListener('input', ()=> initState());
-  rowsInput.addEventListener('input', ()=> initState());
-
-  function renderLegend(){
-    legendDiv.innerHTML = '';
-    const count = Math.max(1, Math.min(R, C, COLORS.length));
-    for(let i=0; i<count; i++){
-      const div = document.createElement('div');
-      div.className = 'legend-item';
-      div.innerHTML = `<div class="swatch" style="background:${COLORS[i]}"></div>光線 ${String.fromCharCode(65+i)}`;
-      legendDiv.appendChild(div);
-    }
-  }
-
-  function renderBoard(){
-    boardWrap.innerHTML = '';
-    const svgNS = 'http://www.w3.org/2000/svg';
-    const CELL = 48;
-    const MARGIN = 60;
-    const w = CELL * C + MARGIN * 2;
-    const h = CELL * R + MARGIN * 2;
-    const svg = document.createElementNS(svgNS,'svg');
-    svg.setAttribute('width', w);
-    svg.setAttribute('height', h);
-    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-
-    // グリッドセル & 鏡描画
-    for(let r=0;r<R;r++){
-      for(let c=0;c<C;c++){
-        const x = c*CELL + MARGIN;
-        const y = r*CELL + MARGIN;
-        const rect = document.createElementNS(svgNS,'rect');
-        rect.setAttribute('x', x); rect.setAttribute('y', y);
-        rect.setAttribute('width', CELL); rect.setAttribute('height', CELL);
-        rect.setAttribute('fill', '#fff'); rect.setAttribute('stroke', '#e2e8f0');
-        svg.appendChild(rect);
-        
-        const m = cfg[r*C + c];
-        if(m){
-          const line = document.createElementNS(svgNS,'line');
-          if(m === 1){
-            line.setAttribute('x1', x + CELL - 6); line.setAttribute('y1', y + 6);
-            line.setAttribute('x2', x + 6); line.setAttribute('y2', y + CELL - 6);
-          } else {
-            line.setAttribute('x1', x + 6); line.setAttribute('y1', y + 6);
-            line.setAttribute('x2', x + CELL - 6); line.setAttribute('y2', y + CELL - 6);
-          }
-          line.setAttribute('stroke', '#334155'); line.setAttribute('stroke-width', 3); svg.appendChild(line);
+        if (cell.type === 'itemA') {
+            step.event = 'itemA';
+            break;
         }
-      }
-    }
 
-    // 下辺のピン（二重円 ◎ の表現）
-    for(let c=0;c<C;c++){
-      const cx = MARGIN + c*CELL + CELL/2;
-      const cy = MARGIN + R*CELL + 20;
-      
-      // 外円
-      const circleOut = document.createElementNS(svgNS,'circle');
-      circleOut.setAttribute('cx', cx); circleOut.setAttribute('cy', cy);
-      circleOut.setAttribute('r', 10);
-      circleOut.setAttribute('fill', 'none');
-      circleOut.setAttribute('stroke', '#475569');
-      circleOut.setAttribute('stroke-width', 1.5);
-      circleOut.dataset.bottom = c; circleOut.style.cursor = 'pointer'; svg.appendChild(circleOut);
-
-      // 内円
-      const circleIn = document.createElementNS(svgNS,'circle');
-      circleIn.setAttribute('cx', cx); circleIn.setAttribute('cy', cy);
-      circleIn.setAttribute('r', 5);
-      circleIn.setAttribute('fill', inputsBottom[c] ? 'var(--primary-color)' : 'transparent');
-      circleIn.setAttribute('stroke', '#475569');
-      circleIn.setAttribute('stroke-width', 1.5);
-      circleIn.dataset.bottom = c; circleIn.style.cursor = 'pointer'; svg.appendChild(circleIn);
-
-      if(inputsBottom[c]){
-        const t = document.createElementNS(svgNS,'text');
-        t.textContent = String.fromCharCode(65 + c);
-        t.setAttribute('x', cx); t.setAttribute('y', cy + 24);
-        t.setAttribute('text-anchor', 'middle');
-        t.setAttribute('font-size', 12); t.setAttribute('font-weight', 'bold');
-        t.setAttribute('fill', 'var(--primary-color)'); svg.appendChild(t);
-      }
-    }
-
-    // 左辺のピン（二重円 ◎ の表現）
-    for(let r=0;r<R;r++){
-      const cx = MARGIN - 20;
-      const cy = MARGIN + r*CELL + CELL/2;
-      
-      // 外円
-      const circleOut = document.createElementNS(svgNS,'circle');
-      circleOut.setAttribute('cx', cx); circleOut.setAttribute('cy', cy);
-      circleOut.setAttribute('r', 10);
-      circleOut.setAttribute('fill', 'none');
-      circleOut.setAttribute('stroke', '#475569');
-      circleOut.setAttribute('stroke-width', 1.5);
-      circleOut.dataset.left = r; circleOut.style.cursor = 'pointer'; svg.appendChild(circleOut);
-
-      // 内円
-      const circleIn = document.createElementNS(svgNS,'circle');
-      circleIn.setAttribute('cx', cx); circleIn.setAttribute('cy', cy);
-      circleIn.setAttribute('r', 5);
-      circleIn.setAttribute('fill', inputsLeft[r] ? 'var(--primary-color)' : 'transparent');
-      circleIn.setAttribute('stroke', '#475569');
-      circleIn.setAttribute('stroke-width', 1.5);
-      circleIn.dataset.left = r; circleIn.style.cursor = 'pointer'; svg.appendChild(circleIn);
-
-      if(inputsLeft[r]){
-        const t = document.createElementNS(svgNS,'text');
-        t.textContent = String.fromCharCode(97 + r);
-        t.setAttribute('x', cx - 24); t.setAttribute('y', cy + 4);
-        t.setAttribute('text-anchor', 'middle');
-        t.setAttribute('font-size', 12); t.setAttribute('font-weight', 'bold');
-        t.setAttribute('fill', 'var(--primary-color)'); svg.appendChild(t);
-      }
-    }
-
-    svg.addEventListener('click', ev => {
-      const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
-      const loc = pt.matrixTransform(svg.getScreenCTM().inverse());
-      handleClick(loc.x, loc.y, svg);
-    });
-
-    boardWrap.appendChild(svg);
-  }
-
-  function handleClick(x, y, svg){
-    const CELL = 48;
-    const MARGIN = 60;
-    
-    // 二重円クリック判定のために当たり判定を12に微増
-    for(const el of svg.querySelectorAll('circle[data-bottom]')){
-      const cx = parseFloat(el.getAttribute('cx')), cy = parseFloat(el.getAttribute('cy'));
-      if(Math.hypot(cx-x, cy-y) <= 12){ const c = parseInt(el.dataset.bottom, 10); inputsBottom[c] = !inputsBottom[c]; renderBoard(); return; }
-    }
-    for(const el of svg.querySelectorAll('circle[data-left]')){
-      const cx = parseFloat(el.getAttribute('cx')), cy = parseFloat(el.getAttribute('cy'));
-      if(Math.hypot(cx-x, cy-y) <= 12){ const r = parseInt(el.dataset.left, 10); inputsLeft[r] = !inputsLeft[r]; renderBoard(); return; }
-    }
-    
-    const gx = x - MARGIN, gy = y - MARGIN;
-    const c = Math.floor(gx / CELL), r = Math.floor(gy / CELL);
-    if(r >= 0 && r < R && c >= 0 && c < C){ cfg[r*C + c] = (cfg[r*C + c] + 1) % 3; renderBoard(); }
-  }
-
-  function simulateMultiByMode(mode){
-    const results = [];
-    const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const lower = upper.toLowerCase();
-    if(mode === 'down' || mode === 'both'){
-      for(let c=0;c<C;c++) if(inputsBottom[c]) results.push({ type:'down', index:c, letter: upper[c] || ('?'+c), res: simulateSingle(R, C, cfg, R-1, c, 0) });
-    }
-    if(mode === 'left' || mode === 'both'){
-      for(let r=0;r<R;r++) if(inputsLeft[r]) results.push({ type:'left', index:r, letter: lower[r] || ('?'+r), res: simulateSingle(R, C, cfg, r, 0, 1) });
-    }
-    return results;
-  }
-
-  function drawSimulation(results){
-    const svg = boardWrap.querySelector('svg'); if(!svg) return;
-    
-    svg.querySelectorAll('[data-overlay]').forEach(e => e.remove());
-    animTimeouts.forEach(clearTimeout);
-    animTimeouts = [];
-
-    const CELL = 48;
-    const MARGIN = 60;
-    const duration = speedSlider ? parseFloat(speedSlider.value) : 1.5;
-
-    for(let i=0; i<results.length; i++){
-      const entry = results[i];
-      const res = entry.res;
-      const color = COLORS[i % COLORS.length];
-      
-      if(res.path && res.path.length > 0){
-        const pathData = res.path.map(([r,c], idx) => 
-          `${idx === 0 ? 'M' : 'L'} ${MARGIN + c*CELL + CELL/2} ${MARGIN + r*CELL + CELL/2}`
-        ).join(' ');
-
-        const pathEl = document.createElementNS('http://www.w3.org/2000/svg','path');
-        pathEl.setAttribute('d', pathData); 
-        pathEl.setAttribute('fill', 'none'); 
-        pathEl.setAttribute('stroke', color);
-        pathEl.setAttribute('stroke-width', 3); 
-        pathEl.setAttribute('stroke-linecap', 'round'); 
-        pathEl.setAttribute('stroke-linejoin', 'round');
-        pathEl.setAttribute('data-overlay', '1'); 
-        svg.appendChild(pathEl);
-
-        const length = pathEl.getTotalLength();
-        pathEl.style.strokeDasharray = length;
-        pathEl.style.strokeDashoffset = length;
-        pathEl.getBoundingClientRect(); 
-        pathEl.style.transition = `stroke-dashoffset ${duration}s linear`;
-        pathEl.style.strokeDashoffset = '0';
-
-        if(res.exited){
-          let exx, exy; const gap = 18;
-          if(res.exitSide === 'R'){ exx = MARGIN + C*CELL + gap; exy = MARGIN + res.exitIndex*CELL + CELL/2; }
-          if(res.exitSide === 'U'){ exx = MARGIN + res.exitIndex*CELL + CELL/2; exy = MARGIN - gap; }
-          if(res.exitSide === 'L'){ exx = MARGIN - gap; exy = MARGIN + res.exitIndex*CELL + CELL/2; }
-          if(res.exitSide === 'D'){ exx = MARGIN + res.exitIndex*CELL + CELL/2; exy = MARGIN + R*CELL + gap; }
-
-          const et = document.createElementNS('http://www.w3.org/2000/svg','text');
-          et.textContent = entry.letter;
-          et.setAttribute('x', exx); et.setAttribute('y', exy);
-          et.setAttribute('font-size', 16); et.setAttribute('font-weight', 'bold');
-          et.setAttribute('fill', '#000'); et.setAttribute('stroke', '#fff'); et.setAttribute('stroke-width', 3);
-          et.setAttribute('paint-order', 'stroke'); et.setAttribute('text-anchor', 'middle'); et.setAttribute('dominant-baseline', 'middle');
-          et.setAttribute('data-overlay', '1'); 
-          et.style.opacity = '0';
-          et.style.transition = 'opacity 0.2s ease';
-          svg.appendChild(et);
-
-          const tid = setTimeout(() => { et.style.opacity = '1'; }, duration * 1000);
-          animTimeouts.push(tid);
+        let nextDir = { ...curDir };
+        if (cell.mirror === 1) { // '/'
+            if (curDir.dx !== 0) nextDir = { dx: 0, dy: -curDir.dx };
+            else nextDir = { dx: -curDir.dy, dy: 0 };
+        } else if (cell.mirror === 2) { // '\'
+            if (curDir.dx !== 0) nextDir = { dx: 0, dy: curDir.dx };
+            else nextDir = { dx: curDir.dy, dy: 0 };
         }
-      }
+        step.outDir = nextDir;
+
+        // ゴール判定
+        let isGoal = false;
+        if (goalEdge.x === curX && goalEdge.y === curY) {
+            if (goalEdge.side === 'top' && nextDir.dy === -1) isGoal = true;
+            if (goalEdge.side === 'bottom' && nextDir.dy === 1) isGoal = true;
+            if (goalEdge.side === 'left' && nextDir.dx === -1) isGoal = true;
+            if (goalEdge.side === 'right' && nextDir.dx === 1) isGoal = true;
+        }
+
+        if (isGoal) {
+            step.event = 'goal';
+            break;
+        }
+
+        curX += nextDir.dx;
+        curY += nextDir.dy;
     }
-    updateStatsAndMapping(results);
-  }
 
-  function updateStatsAndMapping(results){
-    if(!results || results.length === 0){ statsBox.textContent = 'まだシミュレーションしていません。'; mappingContent.textContent = '-'; return; }
-    let exitCount = 0; let total = 0; let html = '', map = '';
-    results.forEach(r => {
-      const len = r.res.path.length; total += len; if(r.res.exited) exitCount++;
-      html += `・${r.letter}: マス数=${len} / ${r.res.exited ? ('出口=' + r.res.exitSide + r.res.exitIndex) : '未到達'}<br>`;
-      map += `<div class="small" style="margin-bottom:2px;">${r.letter} ➔ ${r.res.exited ? (r.res.exitSide + r.res.exitIndex) : '未到達'}</div>`;
-    });
-    statsBox.innerHTML = `・光線本数: ${results.length}<br>・総ステップ数: ${total}<br>・脱出成功数: ${exitCount}<br><br><b>各光線詳細</b><br>${html}`;
-    mappingContent.innerHTML = map;
-  }
+    isShooting = true;
+    animStep = 0;
+    laserInterval = setInterval(() => {
+        animStep++;
+        drawSun();
 
-  simulateBtn.addEventListener('click', ()=>{
-    const results = simulateMultiByMode(simMode.value);
-    drawSimulation(results);
-  });
-  resetBtn.addEventListener('click', ()=>{ if(confirm('盤面をリセットしてもよろしいですか？')) initState(); });
+        // 描画終了時
+        if (animStep >= laserPath.length) {
+            clearInterval(laserInterval);
+            isShooting = false;
+            let lastStep = laserPath[laserPath.length - 1];
+            
+            // 少し遅らせてからアラートを出す（描画を反映させるため）
+            setTimeout(() => {
+                if (lastStep.event === 'itemA') {
+                    alert('アイテムAに触れました！すべての鏡が消滅します。');
+                    // ペナルティ: 全鏡消去
+                    for (let y = 0; y < 9; y++) {
+                        for (let x = 0; x < 9; x++) {
+                            grid[y][x].mirror = 0;
+                        }
+                    }
+                    drawSun();
+                } else if (lastStep.event === 'goal') {
+                    alert('クリア！光がゴールに到達しました。');
+                }
+            }, 50);
+        }
+    }, 200); // 1マスあたり0.2秒
+}
 
-  initState();
+// キャンバスへの光の描画
+function drawLaser() {
+    const canvas = document.getElementById('laser-canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  return { simulateSingle };
-})();
+    if (laserPath.length === 0 || animStep === 0) return;
 
-/* =========================
-   タブ切り替えロジック
-   ========================= */
-(function(){
-  const tabs = document.querySelectorAll('.tab');
-  tabs.forEach(t => t.addEventListener('click', ()=>{
-    tabs.forEach(x=>x.classList.remove('active'));
-    t.classList.add('active');
-    const tgt = t.dataset.target;
-    document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-    document.getElementById(tgt).classList.add('active');
-  }));
-})();
+    ctx.strokeStyle = 'red';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+
+    const CELL_SIZE = 100; // 300px / 3マス
+    let sy = Math.floor(currentSunId / 3);
+    let sx = currentSunId % 3;
+
+    for (let i = 0; i < animStep; i++) {
+        let step = laserPath[i];
+        
+        // 描画ステップが現在表示中のサンに含まれるかチェック
+        if (Math.floor(step.x / 3) === sx && Math.floor(step.y / 3) === sy) {
+            let cx = (step.x % 3) * CELL_SIZE + CELL_SIZE / 2;
+            let cy = (step.y % 3) * CELL_SIZE + CELL_SIZE / 2;
+            
+            // 入射側から中心へ
+            let inX = cx - step.inDir.dx * CELL_SIZE / 2;
+            let inY = cy - step.inDir.dy * CELL_SIZE / 2;
+            ctx.moveTo(inX, inY);
+            ctx.lineTo(cx, cy);
+
+            // 中心から出射側へ
+            if (step.outDir) {
+                let outX = cx + step.outDir.dx * CELL_SIZE / 2;
+                let outY = cy + step.outDir.dy * CELL_SIZE / 2;
+                ctx.lineTo(outX, outY);
+            }
+        }
+    }
+    ctx.stroke();
+}
+
+// ゲーム起動
+initGame();
 </script>
 </body>
 </html>
