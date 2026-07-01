@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>リフレクト・パズル (Reflect Puzzle) - 到達テスト導入版</title>
+    <title>リフレクト・パズル (Reflect Puzzle) - 回数制限・ゲームオーバー追加版</title>
     <style>
         :root {
             --bg-color: #1a1a24;
@@ -84,18 +84,18 @@
             background-color: #2d2d48;
         }
 
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            pointer-events: none;
+            border-color: var(--border-color) !important;
+        }
+
         .mode-btn.active {
             background-color: var(--accent-color);
             color: #000;
             font-weight: bold;
         }
-
-        #btn-reveal {
-            border-color: var(--answer-color);
-            color: var(--answer-color);
-        }
-        #btn-reveal:hover { background-color: rgba(255, 170, 0, 0.1); }
-        #btn-reveal.active { background-color: var(--answer-color); color: #000; font-weight: bold; }
 
         .game-container {
             background-color: var(--panel-bg);
@@ -161,7 +161,7 @@
         .slash { transform: translateY(-50%) rotate(-45deg); }
         .backslash { transform: translateY(-50%) rotate(45deg); }
 
-        .status-message { margin-top: 15px; font-size: 15px; font-weight: bold; min-height: 24px; color: var(--accent-color); text-align: center; line-height: 1.4; }
+        .status-message { margin-top: 15px; font-size: 15px; font-weight: bold; min-height: 40px; color: var(--accent-color); text-align: center; line-height: 1.4; }
 
     </style>
 </head>
@@ -185,8 +185,7 @@
         </select>
         <button id="btn-new-game">新盤面生成</button>
         <button id="btn-mode" class="mode-btn">モード: 通常配置</button>
-        <button id="btn-reveal">答えを表示</button>
-        <button id="btn-check">答え合わせ</button>
+        <button id="btn-check">答え合わせ (残り3回)</button>
     </div>
 
     <div class="game-container">
@@ -201,8 +200,11 @@
         let playerGrid = []; 
         let memoGrid = [];   
         let rayPairs = [];   
+        
         let isMemoMode = false;
-        let isRevealMode = false;
+        let isGameOver = false;
+        let forceReveal = false;
+        let remainingChecks = 3;
 
         const DIR = { UP: 0, RIGHT: 1, DOWN: 2, LEFT: 3 };
 
@@ -211,7 +213,6 @@
         
         const btnNewGame = document.getElementById('btn-new-game');
         const btnMode = document.getElementById('btn-mode');
-        const btnReveal = document.getElementById('btn-reveal');
         const btnCheck = document.getElementById('btn-check');
         const selectDiff = document.getElementById('difficulty');
 
@@ -219,16 +220,10 @@
         btnCheck.addEventListener('click', checkAnswer);
         
         btnMode.addEventListener('click', () => {
+            if (isGameOver) return;
             isMemoMode = !isMemoMode;
             btnMode.textContent = isMemoMode ? "モード: 仮置きメモ" : "モード: 通常配置";
             btnMode.classList.toggle('active', isMemoMode);
-        });
-
-        btnReveal.addEventListener('click', () => {
-            isRevealMode = !isRevealMode;
-            btnReveal.textContent = isRevealMode ? "答えを非表示" : "答えを表示";
-            btnReveal.classList.toggle('active', isRevealMode);
-            refreshAllCells();
         });
 
         selectDiff.addEventListener('change', (e) => {
@@ -247,10 +242,13 @@
 
         // --- 盤面生成ロジック ---
         function initGame() {
+            // ステータスと回数制限のリセット
             statusText.textContent = "";
-            isRevealMode = false;
-            btnReveal.textContent = "答えを表示";
-            btnReveal.classList.remove('active');
+            isGameOver = false;
+            forceReveal = false;
+            remainingChecks = 3;
+            btnCheck.disabled = false;
+            btnCheck.textContent = `答え合わせ (残り${remainingChecks}回)`;
             
             // 1. すべての鏡に光が届く妥当な盤面を生成
             answerGrid = generateValidGrid();
@@ -270,13 +268,10 @@
             const maxAttempts = 10000;
             for (let i = 0; i < maxAttempts; i++) {
                 let grid = createRandomExact2GridFast();
-                
-                // 【追加機能】生成した盤面のすべての鏡に光が当たるかをテスト
                 if (checkAllMirrorsHit(grid)) {
                     return grid;
                 }
             }
-            // 万が一見つからなかった場合のフォールバック
             return createRandomExact2GridFast();
         }
 
@@ -312,12 +307,8 @@
         // --- 光の到達テスト ---
         function checkAllMirrorsHit(grid) {
             let hitSet = new Set();
-            // 下辺からの光
             for (let c = 0; c < N; c++) traceAndMark(grid, N - 1, c, DIR.UP, hitSet);
-            // 左辺からの光
             for (let r = 0; r < N; r++) traceAndMark(grid, r, 0, DIR.RIGHT, hitSet);
-            
-            // 盤面に存在する鏡の総数（N × 2個）と、光が当たった鏡の数が一致すれば合格
             return hitSet.size === (2 * N);
         }
 
@@ -458,7 +449,8 @@
                                 let m = document.createElement('div'); m.classList.add('memo-mirror', 'backslash'); this.appendChild(m);
                             }
 
-                            if (isRevealMode && answerGrid[r][c] !== 0) {
+                            // ゲームオーバー時に正解の鏡を透過表示
+                            if (forceReveal && answerGrid[r][c] !== 0) {
                                 let am = document.createElement('div');
                                 am.classList.add('answer-mirror');
                                 am.classList.add(answerGrid[r][c] === 1 ? 'slash' : 'backslash');
@@ -474,6 +466,9 @@
         }
 
         function handleCellClick(r, c) {
+            // ゲームオーバー時は操作不能にする
+            if (isGameOver) return;
+            
             statusText.textContent = "";
             const cellEl = document.querySelector(`.cell[data-row='${r}'][data-col='${c}']`);
             if (isMemoMode) {
@@ -504,38 +499,70 @@
         }
 
         function checkAnswer() {
+            if (isGameOver || remainingChecks <= 0) return;
+
+            remainingChecks--;
+            btnCheck.textContent = `答え合わせ (残り${remainingChecks}回)`;
+
+            let isCorrect = true;
+            let errorMsg = "";
+
+            // --- 判定処理 ---
             for (let r = 0; r < N; r++) {
                 let count = 0;
                 for (let c = 0; c < N; c++) { if (playerGrid[r][c] !== 0) count++; }
                 if (count !== 2) {
-                    statusText.textContent = `❌ 不正解: ${r+1}行目の鏡が2個ではありません`;
-                    statusText.style.color = "#ff4444";
-                    return;
-                }
-            }
-            for (let c = 0; c < N; c++) {
-                let count = 0;
-                for (let r = 0; r < N; r++) { if (playerGrid[r][c] !== 0) count++; }
-                if (count !== 2) {
-                    statusText.textContent = `❌ 不正解: ${c+1}列目の鏡が2個ではありません`;
-                    statusText.style.color = "#ff4444";
-                    return;
+                    isCorrect = false;
+                    errorMsg = `❌ 不正解: ${r+1}行目の鏡が2個ではありません`;
+                    break;
                 }
             }
 
-            let playerPairs = simulateAllRays(playerGrid);
-            for (let i = 0; i < rayPairs.length; i++) {
-                let target = rayPairs[i];
-                let player = playerPairs[i];
-                if (player.end.type !== target.end.type || player.end.idx !== target.end.idx) {
-                    statusText.textContent = "❌ 不正解: 光のつながりが問題のヒントと一致しない場所があります。";
-                    statusText.style.color = "#ff4444";
-                    return;
+            if (isCorrect) {
+                for (let c = 0; c < N; c++) {
+                    let count = 0;
+                    for (let r = 0; r < N; r++) { if (playerGrid[r][c] !== 0) count++; }
+                    if (count !== 2) {
+                        isCorrect = false;
+                        errorMsg = `❌ 不正解: ${c+1}列目の鏡が2個ではありません`;
+                        break;
+                    }
                 }
             }
 
-            statusText.textContent = "🎉 正解です！すべての条件を完璧に満たしています！";
-            statusText.style.color = "var(--accent-color)";
+            if (isCorrect) {
+                let playerPairs = simulateAllRays(playerGrid);
+                for (let i = 0; i < rayPairs.length; i++) {
+                    let target = rayPairs[i];
+                    let player = playerPairs[i];
+                    if (player.end.type !== target.end.type || player.end.idx !== target.end.idx) {
+                        isCorrect = false;
+                        errorMsg = "❌ 不正解: 光のつながりが問題のヒントと一致しない場所があります。";
+                        break;
+                    }
+                }
+            }
+
+            // --- 結果の反映 ---
+            if (isCorrect) {
+                statusText.textContent = "🎉 正解です！すべての条件を完璧に満たしています！";
+                statusText.style.color = "var(--accent-color)";
+                isGameOver = true;
+                btnCheck.disabled = true;
+            } else {
+                if (remainingChecks > 0) {
+                    statusText.textContent = errorMsg;
+                    statusText.style.color = "#ff4444";
+                } else {
+                    // 3回ミスでゲームオーバー
+                    statusText.innerHTML = `${errorMsg}<br>💀 ゲームオーバー... 正解を表示します。`;
+                    statusText.style.color = "#ff4444";
+                    isGameOver = true;
+                    btnCheck.disabled = true;
+                    forceReveal = true; // 正解を表示するフラグを立てる
+                    refreshAllCells();  // 盤面を再描画して正解を映し出す
+                }
+            }
         }
 
         initGame();
