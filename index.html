@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>リフレクト・パズル (Reflect Puzzle) - 回数制限・ゲームオーバー追加版</title>
+    <title>リフレクト・パズル (Reflect Puzzle) - ゲームオーバー時クリア機能版</title>
     <style>
         :root {
             --bg-color: #1a1a24;
@@ -156,7 +156,7 @@
         }
         .mirror { background-color: var(--mirror-color); box-shadow: 0 0 8px rgba(255,255,255,0.8); height: 3px; z-index: 3; }
         .memo-mirror { background-color: var(--memo-color); border-top: 2px dashed var(--memo-color); height: 0; z-index: 2; }
-        .answer-mirror { background-color: var(--answer-color); box-shadow: 0 0 8px rgba(255, 170, 0, 0.8); height: 3px; z-index: 1; opacity: 0.6; }
+        .answer-mirror { background-color: var(--answer-color); box-shadow: 0 0 8px rgba(255, 170, 0, 0.8); height: 3px; z-index: 1; } /* opacity: 0.6 を削除し、くっきり表示に */
 
         .slash { transform: translateY(-50%) rotate(-45deg); }
         .backslash { transform: translateY(-50%) rotate(45deg); }
@@ -250,17 +250,12 @@
             btnCheck.disabled = false;
             btnCheck.textContent = `答え合わせ (残り${remainingChecks}回)`;
             
-            // 1. すべての鏡に光が届く妥当な盤面を生成
             answerGrid = generateValidGrid();
-            
-            // 2. その盤面の光のペアを固定ヒントとして抽出
             rayPairs = simulateAllRays(answerGrid);
             
-            // 3. プレイヤー用配列の初期化
             playerGrid = Array.from({ length: N }, () => Array(N).fill(0));
             memoGrid = Array.from({ length: N }, () => Array(N).fill(0));
             
-            // 4. 盤面を描画
             renderBoard();
         }
 
@@ -304,7 +299,6 @@
             return grid;
         }
 
-        // --- 光の到達テスト ---
         function checkAllMirrorsHit(grid) {
             let hitSet = new Set();
             for (let c = 0; c < N; c++) traceAndMark(grid, N - 1, c, DIR.UP, hitSet);
@@ -339,7 +333,6 @@
             }
         }
 
-        // --- ヒントの生成 ---
         function simulateAllRays(grid) {
             let pairs = [];
             for (let c = 0; c < N; c++) {
@@ -387,7 +380,6 @@
             return { type: 'unknown', idx: -1 };
         }
 
-        // --- 描画関連 ---
         function renderBoard() {
             boardEl.innerHTML = "";
             let cellSize = 54;
@@ -449,7 +441,7 @@
                                 let m = document.createElement('div'); m.classList.add('memo-mirror', 'backslash'); this.appendChild(m);
                             }
 
-                            // ゲームオーバー時に正解の鏡を透過表示
+                            // ゲームオーバー時に正解の鏡を表示
                             if (forceReveal && answerGrid[r][c] !== 0) {
                                 let am = document.createElement('div');
                                 am.classList.add('answer-mirror');
@@ -466,7 +458,6 @@
         }
 
         function handleCellClick(r, c) {
-            // ゲームオーバー時は操作不能にする
             if (isGameOver) return;
             
             statusText.textContent = "";
@@ -507,7 +498,6 @@
             let isCorrect = true;
             let errorMsg = "";
 
-            // --- 判定処理 ---
             for (let r = 0; r < N; r++) {
                 let count = 0;
                 for (let c = 0; c < N; c++) { if (playerGrid[r][c] !== 0) count++; }
@@ -543,7 +533,6 @@
                 }
             }
 
-            // --- 結果の反映 ---
             if (isCorrect) {
                 statusText.textContent = "🎉 正解です！すべての条件を完璧に満たしています！";
                 statusText.style.color = "var(--accent-color)";
@@ -554,13 +543,22 @@
                     statusText.textContent = errorMsg;
                     statusText.style.color = "#ff4444";
                 } else {
-                    // 3回ミスでゲームオーバー
-                    statusText.innerHTML = `${errorMsg}<br>💀 ゲームオーバー... 正解を表示します。`;
+                    // 3回ミスでゲームオーバー処理
+                    statusText.innerHTML = `${errorMsg}<br>💀 ゲームオーバー... 置かれていた鏡を消去し、正解を表示します。`;
                     statusText.style.color = "#ff4444";
                     isGameOver = true;
                     btnCheck.disabled = true;
-                    forceReveal = true; // 正解を表示するフラグを立てる
-                    refreshAllCells();  // 盤面を再描画して正解を映し出す
+                    forceReveal = true;
+                    
+                    // 【追加】プレイヤーの配置とメモをすべて消去
+                    for (let r = 0; r < N; r++) {
+                        for (let c = 0; c < N; c++) {
+                            playerGrid[r][c] = 0;
+                            memoGrid[r][c] = 0;
+                        }
+                    }
+                    
+                    refreshAllCells(); // 盤面を再描画（正解だけが表示される）
                 }
             }
         }
