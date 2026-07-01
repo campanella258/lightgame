@@ -1,537 +1,544 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>光の反射パズル（リフレクションパズル）</title>
-<style>
-    body {
-        font-family: sans-serif;
-        text-align: center;
-        background-color: #ffffff;
-        color: #000000;
-        margin-top: 30px;
-    }
-    h1 {
-        font-size: 24px;
-        margin-bottom: 10px;
-    }
-    #status-container {
-        font-size: 18px;
-        margin-bottom: 15px;
-        font-weight: bold;
-    }
-    #shoot-count {
-        color: #d9534f;
-        font-size: 22px;
-    }
-    #ui-controls {
-        margin-bottom: 20px;
-    }
-    button {
-        padding: 8px 16px;
-        font-size: 16px;
-        cursor: pointer;
-        margin: 0 5px;
-        background-color: #f0f0f0;
-        border: 1px solid #333;
-        border-radius: 4px;
-    }
-    button:hover {
-        background-color: #e0e0e0;
-    }
-    button:disabled {
-        cursor: not-allowed;
-        opacity: 0.5;
-    }
-    #sector-indicator {
-        font-size: 18px;
-        font-weight: bold;
-        display: inline-block;
-        width: 140px;
-    }
-    
-    /* 盤面エリア (レスポンシブな正方形) */
-    #game-area {
-        position: relative;
-        width: 100%;
-        max-width: 400px;
-        aspect-ratio: 1 / 1;
-        margin: 0 auto;
-        border: 2px solid #000;
-        background-color: #fff;
-        overflow: hidden; /* 領域外を隠す */
-    }
-    #grid-container {
-        display: grid;
-        width: 100%;
-        height: 100%;
-        position: relative;
-        z-index: 1; /* レーザーより下に配置 */
-    }
-    .cell {
-        border: 1px solid #000;
-        box-sizing: border-box;
-        position: relative;
-        cursor: pointer;
-        background-color: #fff;
-    }
-    .wall {
-        background-color: #000;
-        cursor: not-allowed;
-    }
-    .item-a::before {
-        content: '';
-        position: absolute;
-        width: 60%;
-        height: 60%;
-        border: 4px solid #000;
-        border-radius: 50%;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        box-sizing: border-box;
-    }
-    
-    /* 鏡 (/) : mirror=1 */
-    .mirror-1 {
-        background-image: linear-gradient(to bottom right, transparent calc(50% - 2px), black calc(50% - 2px), black calc(50% + 2px), transparent calc(50% + 2px));
-    }
-    /* 鏡 (\) : mirror=2 */
-    .mirror-2 {
-        background-image: linear-gradient(to top right, transparent calc(50% - 2px), black calc(50% - 2px), black calc(50% + 2px), transparent calc(50% + 2px));
-    }
-    
-    .start-top { box-shadow: inset 0 8px 0 blue; }
-    .start-bottom { box-shadow: inset 0 -8px 0 blue; }
-    .start-left { box-shadow: inset 8px 0 0 blue; }
-    .start-right { box-shadow: inset -8px 0 0 blue; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>リフレクト・パズル (Reflect Puzzle) - 到達テスト導入版</title>
+    <style>
+        :root {
+            --bg-color: #1a1a24;
+            --panel-bg: #252538;
+            --grid-bg: #2d2d44;
+            --border-color: #444466;
+            --text-color: #e0e0ff;
+            --accent-color: #00ffff;
+            --accent-highlight: #ff00ff;
+            --mirror-color: #ffffff;
+            --memo-color: #8888aa;
+            --answer-color: #ffaa00;
+        }
 
-    .goal-top { box-shadow: inset 0 8px 0 red; }
-    .goal-bottom { box-shadow: inset 0 -8px 0 red; }
-    .goal-left { box-shadow: inset 8px 0 0 red; }
-    .goal-right { box-shadow: inset -8px 0 0 red; }
+        * { box-sizing: border-box; user-select: none; }
 
-    /* レーザー描画用キャンバス（内部論理は900x900） */
-    #laser-canvas {
-        position: absolute;
-        top: 0;
-        left: 0;
-        pointer-events: none;
-        z-index: 2;
-    }
-</style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        h1 {
+            margin-bottom: 5px;
+            font-size: 24px;
+            text-align: center;
+            color: var(--accent-color);
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+        }
+
+        .description {
+            max-width: 600px;
+            font-size: 14px;
+            color: #aaaaf0;
+            margin-bottom: 15px;
+            text-align: center;
+            line-height: 1.5;
+        }
+        
+        .rule-box {
+            background-color: rgba(0, 255, 255, 0.1);
+            border: 1px solid var(--accent-color);
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        button, select {
+            background-color: var(--panel-bg);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        button:hover, select:hover {
+            border-color: var(--accent-color);
+            background-color: #2d2d48;
+        }
+
+        .mode-btn.active {
+            background-color: var(--accent-color);
+            color: #000;
+            font-weight: bold;
+        }
+
+        #btn-reveal {
+            border-color: var(--answer-color);
+            color: var(--answer-color);
+        }
+        #btn-reveal:hover { background-color: rgba(255, 170, 0, 0.1); }
+        #btn-reveal.active { background-color: var(--answer-color); color: #000; font-weight: bold; }
+
+        .game-container {
+            background-color: var(--panel-bg);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            overflow: visible;
+            display: block;
+        }
+
+        #board {
+            display: grid;
+            background-color: var(--grid-bg);
+            border: 2px solid var(--border-color);
+            margin: 0 auto;
+        }
+
+        .cell {
+            position: relative;
+            border: 1px solid rgba(68, 68, 102, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .cell:hover { background-color: rgba(255, 255, 255, 0.05); }
+
+        .edge {
+            background-color: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .edge::after {
+            content: ''; width: 8px; height: 8px;
+            border-radius: 50%; background-color: #3d3d5c;
+            transition: all 0.2s;
+        }
+        .edge.laser-source::after { background-color: #446644; }
+        .edge.highlight::after {
+            background-color: var(--accent-color) !important;
+            box-shadow: 0 0 12px var(--accent-color);
+            transform: scale(1.5);
+        }
+        .edge.highlight-pair::after {
+            background-color: var(--accent-highlight) !important;
+            box-shadow: 0 0 12px var(--accent-highlight);
+            transform: scale(1.5);
+        }
+
+        .mirror, .memo-mirror, .answer-mirror {
+            position: absolute; width: 80%; height: 2px;
+            top: 50%; left: 10%; transform-origin: center;
+        }
+        .mirror { background-color: var(--mirror-color); box-shadow: 0 0 8px rgba(255,255,255,0.8); height: 3px; z-index: 3; }
+        .memo-mirror { background-color: var(--memo-color); border-top: 2px dashed var(--memo-color); height: 0; z-index: 2; }
+        .answer-mirror { background-color: var(--answer-color); box-shadow: 0 0 8px rgba(255, 170, 0, 0.8); height: 3px; z-index: 1; opacity: 0.6; }
+
+        .slash { transform: translateY(-50%) rotate(-45deg); }
+        .backslash { transform: translateY(-50%) rotate(45deg); }
+
+        .status-message { margin-top: 15px; font-size: 15px; font-weight: bold; min-height: 24px; color: var(--accent-color); text-align: center; line-height: 1.4; }
+
+    </style>
 </head>
 <body>
 
-<h1>光の反射パズル</h1>
+    <h1>リフレクト・パズル</h1>
+    <div class="description">
+        <div class="rule-box" id="rule-text">ルール：各行・各列には【必ず2個】の鏡が隠されています。</div>
+        下辺と左辺の●にマウスを重ねると、光の「入口」と「出口」がハイライトされます。<br>
+        「行・列に必ず2個」という条件を満たし、光のペアを正しくつなぐ鏡の配置を導き出してください。
+    </div>
 
-<div id="status-container">
-    残り照射回数: <span id="shoot-count">5</span> 回
-</div>
+    <div class="controls">
+        <select id="difficulty">
+            <option value="3">3 × 3 (初級)</option>
+            <option value="4">4 × 4 (初級)</option>
+            <option value="5" selected>5 × 5 (中級)</option>
+            <option value="6">6 × 6 (中級)</option>
+            <option value="7">7 × 7 (上級)</option>
+            <option value="8">8 × 8 (上級)</option>
+        </select>
+        <button id="btn-new-game">新盤面生成</button>
+        <button id="btn-mode" class="mode-btn">モード: 通常配置</button>
+        <button id="btn-reveal">答えを表示</button>
+        <button id="btn-check">答え合わせ</button>
+    </div>
 
-<div id="ui-controls">
-    <button onclick="changeSector(-1)" id="btn-prev">前に戻る</button>
-    <span id="sector-indicator">セクター: 1</span>
-    <button onclick="changeSector(1)" id="btn-next">次に行く</button>
-    <br><br>
-    <button id="shoot-btn" onclick="shootLaser()">照射 / 再照射</button>
-    <button onclick="initGame()">リセット</button>
-</div>
+    <div class="game-container">
+        <div id="board"></div>
+    </div>
 
-<div id="game-area">
-    <div id="grid-container"></div>
-    <canvas id="laser-canvas" width="900" height="900"></canvas>
-</div>
+    <div class="status-message" id="status-text"></div>
 
-<script>
-const GRID_SIZE = 9;
-const CELL_SIZE = 100; // キャンバス内の論理的な1マスのサイズ
-let grid = [];
+    <script>
+        let N = 5;
+        let answerGrid = []; 
+        let playerGrid = []; 
+        let memoGrid = [];   
+        let rayPairs = [];   
+        let isMemoMode = false;
+        let isRevealMode = false;
 
-// 方向: 0=上, 1=右, 2=下, 3=左
-const DIR_UP = 0, DIR_RIGHT = 1, DIR_DOWN = 2, DIR_LEFT = 3;
-const DX = [0, 1, 0, -1];
-const DY = [-1, 0, 1, 0];
+        const DIR = { UP: 0, RIGHT: 1, DOWN: 2, LEFT: 3 };
 
-let currentSectorId = 0;
-let startEdge = null;
-let goalEdge = null;
-
-let isShooting = false;
-let isGameOver = false;
-let remainingShoots = 5;
-
-// アニメーション用変数
-let animReq = null;
-let laserPts = [];
-let laserTotalLength = 0;
-let totalDrawnLength = 0;
-let lastTime = 0;
-
-function getReflectedDir(dir, mirror) {
-    if (mirror === 0) return dir;
-    if (mirror === 1) return [1, 0, 3, 2][dir]; // '/'
-    if (mirror === 2) return [3, 2, 1, 0][dir]; // '\'
-    return dir;
-}
-
-// 【追加】スタートからゴールまで障害物を避けて繋がっているかを確認する関数
-function checkPathExists() {
-    let queue = [{ x: startEdge.x, y: startEdge.y }];
-    let visited = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(false));
-    visited[startEdge.y][startEdge.x] = true;
-
-    while (queue.length > 0) {
-        let curr = queue.shift();
+        const boardEl = document.getElementById('board');
+        const statusText = document.getElementById('status-text');
         
-        // ゴール地点に到達できればクリア可能なルートが存在する
-        if (curr.x === goalEdge.x && curr.y === goalEdge.y) {
-            return true;
-        }
+        const btnNewGame = document.getElementById('btn-new-game');
+        const btnMode = document.getElementById('btn-mode');
+        const btnReveal = document.getElementById('btn-reveal');
+        const btnCheck = document.getElementById('btn-check');
+        const selectDiff = document.getElementById('difficulty');
 
-        for (let i = 0; i < 4; i++) {
-            let nx = curr.x + DX[i];
-            let ny = curr.y + DY[i];
-            
-            if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
-                // 壁やアイテムAを避け、未訪問の空きマスのみ進む
-                if (!visited[ny][nx] && grid[ny][nx].type === 'empty') {
-                    visited[ny][nx] = true;
-                    queue.push({ x: nx, y: ny });
+        btnNewGame.addEventListener('click', initGame);
+        btnCheck.addEventListener('click', checkAnswer);
+        
+        btnMode.addEventListener('click', () => {
+            isMemoMode = !isMemoMode;
+            btnMode.textContent = isMemoMode ? "モード: 仮置きメモ" : "モード: 通常配置";
+            btnMode.classList.toggle('active', isMemoMode);
+        });
+
+        btnReveal.addEventListener('click', () => {
+            isRevealMode = !isRevealMode;
+            btnReveal.textContent = isRevealMode ? "答えを非表示" : "答えを表示";
+            btnReveal.classList.toggle('active', isRevealMode);
+            refreshAllCells();
+        });
+
+        selectDiff.addEventListener('change', (e) => {
+            N = parseInt(e.target.value);
+            initGame();
+        });
+
+        function refreshAllCells() {
+            for (let r = 0; r < N; r++) {
+                for (let c = 0; c < N; c++) {
+                    const cellEl = document.querySelector(`.cell[data-row='${r}'][data-col='${c}']`);
+                    if (cellEl) cellEl.updateMirror();
                 }
             }
         }
-    }
-    return false; // 道が塞がれている
-}
 
-function initGame() {
-    remainingShoots = 5;
-    isShooting = false;
-    isGameOver = false;
-    laserPts = [];
-    if (animReq) cancelAnimationFrame(animReq);
+        // --- 盤面生成ロジック ---
+        function initGame() {
+            statusText.textContent = "";
+            isRevealMode = false;
+            btnReveal.textContent = "答えを表示";
+            btnReveal.classList.remove('active');
+            
+            // 1. すべての鏡に光が届く妥当な盤面を生成
+            answerGrid = generateValidGrid();
+            
+            // 2. その盤面の光のペアを固定ヒントとして抽出
+            rayPairs = simulateAllRays(answerGrid);
+            
+            // 3. プレイヤー用配列の初期化
+            playerGrid = Array.from({ length: N }, () => Array(N).fill(0));
+            memoGrid = Array.from({ length: N }, () => Array(N).fill(0));
+            
+            // 4. 盤面を描画
+            renderBoard();
+        }
 
-    let edges = [];
-    for (let x = 0; x < 9; x++) edges.push({ x: x, y: 0, side: 'top', dir: DIR_DOWN, sectorId: Math.floor(x / 3) });
-    for (let x = 0; x < 9; x++) edges.push({ x: x, y: 8, side: 'bottom', dir: DIR_UP, sectorId: 6 + Math.floor(x / 3) });
-    for (let y = 0; y < 9; y++) edges.push({ x: 0, y: y, side: 'left', dir: DIR_RIGHT, sectorId: Math.floor(y / 3) * 3 });
-    for (let y = 0; y < 9; y++) edges.push({ x: 8, y: y, side: 'right', dir: DIR_LEFT, sectorId: Math.floor(y / 3) * 3 + 2 });
+        function generateValidGrid() {
+            const maxAttempts = 10000;
+            for (let i = 0; i < maxAttempts; i++) {
+                let grid = createRandomExact2GridFast();
+                
+                // 【追加機能】生成した盤面のすべての鏡に光が当たるかをテスト
+                if (checkAllMirrorsHit(grid)) {
+                    return grid;
+                }
+            }
+            // 万が一見つからなかった場合のフォールバック
+            return createRandomExact2GridFast();
+        }
 
-    let boardValid = false;
-    
-    // 【修正】道が繋がっている盤面が生成されるまで何度でもやり直す
-    while (!boardValid) {
-        // グリッド初期化
-        for (let y = 0; y < GRID_SIZE; y++) {
-            grid[y] = [];
-            for (let x = 0; x < GRID_SIZE; x++) {
-                grid[y][x] = { type: 'empty', mirror: 0 };
+        function createRandomExact2GridFast() {
+            let grid = Array.from({length: N}, () => Array(N).fill(0));
+            
+            let p1 = Array.from({length: N}, (_, i) => i);
+            for (let i = N - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [p1[i], p1[j]] = [p1[j], p1[i]];
+            }
+            
+            let p2 = Array.from({length: N}, (_, i) => i);
+            let valid = false;
+            while (!valid) {
+                for (let i = N - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [p2[i], p2[j]] = [p2[j], p2[i]];
+                }
+                valid = true;
+                for (let i = 0; i < N; i++) {
+                    if (p1[i] === p2[i]) { valid = false; break; }
+                }
+            }
+
+            for (let i = 0; i < N; i++) {
+                grid[i][p1[i]] = Math.random() < 0.5 ? 1 : 2;
+                grid[i][p2[i]] = Math.random() < 0.5 ? 1 : 2;
+            }
+            return grid;
+        }
+
+        // --- 光の到達テスト ---
+        function checkAllMirrorsHit(grid) {
+            let hitSet = new Set();
+            // 下辺からの光
+            for (let c = 0; c < N; c++) traceAndMark(grid, N - 1, c, DIR.UP, hitSet);
+            // 左辺からの光
+            for (let r = 0; r < N; r++) traceAndMark(grid, r, 0, DIR.RIGHT, hitSet);
+            
+            // 盤面に存在する鏡の総数（N × 2個）と、光が当たった鏡の数が一致すれば合格
+            return hitSet.size === (2 * N);
+        }
+
+        function traceAndMark(grid, startR, startC, startDir, hitSet) {
+            let r = startR; let c = startC; let dir = startDir;
+            let steps = 0; const maxSteps = N * N * 2;
+            while (r >= 0 && r < N && c >= 0 && c < N && steps < maxSteps) {
+                steps++;
+                let mirror = grid[r][c];
+                if (mirror !== 0) {
+                    hitSet.add(r + "," + c);
+                    if (mirror === 1) { 
+                        if (dir === DIR.UP) dir = DIR.RIGHT;
+                        else if (dir === DIR.RIGHT) dir = DIR.UP;
+                        else if (dir === DIR.DOWN) dir = DIR.LEFT;
+                        else if (dir === DIR.LEFT) dir = DIR.DOWN;
+                    } else if (mirror === 2) { 
+                        if (dir === DIR.UP) dir = DIR.LEFT;
+                        else if (dir === DIR.LEFT) dir = DIR.UP;
+                        else if (dir === DIR.DOWN) dir = DIR.RIGHT;
+                        else if (dir === DIR.RIGHT) dir = DIR.DOWN;
+                    }
+                }
+                if (dir === DIR.UP) r--;
+                else if (dir === DIR.RIGHT) c++;
+                else if (dir === DIR.DOWN) r++;
+                else if (dir === DIR.LEFT) c--;
             }
         }
 
-        // スタートとゴールを配置
-        startEdge = edges[Math.floor(Math.random() * edges.length)];
-        while (true) {
-            let candidate = edges[Math.floor(Math.random() * edges.length)];
-            if (candidate.sectorId !== startEdge.sectorId) {
-                goalEdge = candidate;
-                break;
+        // --- ヒントの生成 ---
+        function simulateAllRays(grid) {
+            let pairs = [];
+            for (let c = 0; c < N; c++) {
+                let start = { type: 'bottom', idx: c };
+                let end = traceRay(grid, N - 1, c, DIR.UP);
+                pairs.push({ start, end });
             }
+            for (let r = 0; r < N; r++) {
+                let start = { type: 'left', idx: r };
+                let end = traceRay(grid, r, 0, DIR.RIGHT);
+                pairs.push({ start, end });
+            }
+            return pairs;
         }
 
-        // 障害物を配置（各セクターにつき：壁×2、アイテムA×1）
-        for (let sy = 0; sy < 3; sy++) {
-            for (let sx = 0; sx < 3; sx++) {
-                let obstaclesToPlace = ['wall', 'wall', 'itemA'];
-                for (let item of obstaclesToPlace) {
-                    while (true) {
-                        let dx = Math.floor(Math.random() * 3);
-                        let dy = Math.floor(Math.random() * 3);
-                        let x = sx * 3 + dx;
-                        let y = sy * 3 + dy;
+        function traceRay(grid, startR, startC, startDir) {
+            let r = startR; let c = startC; let dir = startDir;
+            let steps = 0; const maxSteps = N * N * 2;
+
+            while (r >= 0 && r < N && c >= 0 && c < N && steps < maxSteps) {
+                steps++;
+                let mirror = grid[r][c];
+                if (mirror === 1) { 
+                    if (dir === DIR.UP) dir = DIR.RIGHT;
+                    else if (dir === DIR.RIGHT) dir = DIR.UP;
+                    else if (dir === DIR.DOWN) dir = DIR.LEFT;
+                    else if (dir === DIR.LEFT) dir = DIR.DOWN;
+                } else if (mirror === 2) { 
+                    if (dir === DIR.UP) dir = DIR.LEFT;
+                    else if (dir === DIR.LEFT) dir = DIR.UP;
+                    else if (dir === DIR.DOWN) dir = DIR.RIGHT;
+                    else if (dir === DIR.RIGHT) dir = DIR.DOWN;
+                }
+
+                if (dir === DIR.UP) r--;
+                else if (dir === DIR.RIGHT) c++;
+                else if (dir === DIR.DOWN) r++;
+                else if (dir === DIR.LEFT) c--;
+            }
+
+            if (r < 0) return { type: 'top', idx: c };
+            if (c >= N) return { type: 'right', idx: r };
+            if (r >= N) return { type: 'bottom', idx: c };
+            if (c < 0) return { type: 'left', idx: r };
+            return { type: 'unknown', idx: -1 };
+        }
+
+        // --- 描画関連 ---
+        function renderBoard() {
+            boardEl.innerHTML = "";
+            let cellSize = 54;
+            if (N === 6) cellSize = 48;
+            if (N === 7) cellSize = 44;
+            if (N === 8) cellSize = 40;
+
+            boardEl.style.gridTemplateColumns = `repeat(${N + 2}, ${cellSize}px)`;
+            boardEl.style.gridTemplateRows = `repeat(${N + 2}, ${cellSize}px)`;
+
+            for (let r = -1; r <= N; r++) {
+                for (let c = -1; c <= N; c++) {
+                    if ((r === -1 || r === N) && (c === -1 || c === N)) {
+                        let empty = document.createElement('div');
+                        boardEl.appendChild(empty);
+                        continue;
+                    }
+
+                    if (r === -1 || r === N || c === -1 || c === N) {
+                        let edgeEl = document.createElement('div');
+                        edgeEl.classList.add('edge');
                         
-                        // スタート地点とゴール地点には障害物を置かない
-                        if ((x === startEdge.x && y === startEdge.y) || (x === goalEdge.x && y === goalEdge.y)) continue;
-                        
-                        if (grid[y][x].type === 'empty') {
-                            grid[y][x].type = item;
-                            break;
+                        let type = ''; let idx = -1;
+                        if (r === -1) { type = 'top'; idx = c; }
+                        else if (c === N) { type = 'right'; idx = r; }
+                        else if (r === N) { type = 'bottom'; idx = c; }
+                        else if (c === -1) { type = 'left'; idx = r; }
+
+                        edgeEl.dataset.type = type;
+                        edgeEl.dataset.idx = idx;
+
+                        if (type === 'bottom' || type === 'left') {
+                            edgeEl.classList.add('laser-source');
                         }
+
+                        edgeEl.addEventListener('mouseenter', () => highlightPair(type, idx));
+                        edgeEl.addEventListener('mouseleave', clearHighlight);
+
+                        boardEl.appendChild(edgeEl);
+                    } else {
+                        let cellEl = document.createElement('div');
+                        cellEl.classList.add('cell');
+                        cellEl.dataset.row = r;
+                        cellEl.dataset.col = c;
+                        cellEl.style.width = `${cellSize}px`;
+                        cellEl.style.height = `${cellSize}px`;
+
+                        cellEl.addEventListener('click', () => handleCellClick(r, c));
+
+                        cellEl.updateMirror = function() {
+                            this.innerHTML = ""; 
+                            if (playerGrid[r][c] === 1) {
+                                let m = document.createElement('div'); m.classList.add('mirror', 'slash'); this.appendChild(m);
+                            } else if (playerGrid[r][c] === 2) {
+                                let m = document.createElement('div'); m.classList.add('mirror', 'backslash'); this.appendChild(m);
+                            } else if (memoGrid[r][c] === 1) {
+                                let m = document.createElement('div'); m.classList.add('memo-mirror', 'slash'); this.appendChild(m);
+                            } else if (memoGrid[r][c] === 2) {
+                                let m = document.createElement('div'); m.classList.add('memo-mirror', 'backslash'); this.appendChild(m);
+                            }
+
+                            if (isRevealMode && answerGrid[r][c] !== 0) {
+                                let am = document.createElement('div');
+                                am.classList.add('answer-mirror');
+                                am.classList.add(answerGrid[r][c] === 1 ? 'slash' : 'backslash');
+                                this.appendChild(am);
+                            }
+                        };
+
+                        boardEl.appendChild(cellEl);
+                        cellEl.updateMirror();
                     }
                 }
             }
         }
 
-        // 盤面がクリア可能か検証
-        boardValid = checkPathExists();
-    }
-
-    updateUI();
-    drawSector();
-}
-
-function updateUI() {
-    document.getElementById('shoot-count').innerText = remainingShoots;
-    
-    const indicator = document.getElementById('sector-indicator');
-    const btnPrev = document.getElementById('btn-prev');
-    const btnNext = document.getElementById('btn-next');
-    const btnShoot = document.getElementById('shoot-btn');
-
-    if (isGameOver) {
-        indicator.innerText = `全体表示 (9×9)`;
-        btnPrev.disabled = true;
-        btnNext.disabled = true;
-        btnShoot.disabled = true;
-    } else {
-        indicator.innerText = `セクター: ${currentSectorId + 1}`;
-        btnPrev.disabled = false;
-        btnNext.disabled = false;
-        btnShoot.disabled = false;
-    }
-}
-
-function changeSector(dir) {
-    if (isGameOver) return;
-    currentSectorId += dir;
-    if (currentSectorId < 0) currentSectorId = 8;
-    if (currentSectorId > 8) currentSectorId = 0;
-    updateUI();
-    drawSector();
-}
-
-function createCell(x, y, container) {
-    let cell = grid[y][x];
-    let div = document.createElement('div');
-    div.className = 'cell';
-
-    if (cell.type === 'wall') div.classList.add('wall');
-    if (cell.type === 'itemA') div.classList.add('item-a');
-    if (cell.mirror === 1) div.classList.add('mirror-1');
-    if (cell.mirror === 2) div.classList.add('mirror-2');
-
-    if (startEdge.x === x && startEdge.y === y) div.classList.add('start-' + startEdge.side);
-    if (goalEdge.x === x && goalEdge.y === y) div.classList.add('goal-' + goalEdge.side);
-
-    div.onclick = () => {
-        if (isShooting || isGameOver) return; 
-        if (cell.type === 'wall' || cell.type === 'itemA') return; 
-
-        if (!isShooting && laserPts.length > 0) {
-            laserPts = [];
-            drawCanvas();
+        function handleCellClick(r, c) {
+            statusText.textContent = "";
+            const cellEl = document.querySelector(`.cell[data-row='${r}'][data-col='${c}']`);
+            if (isMemoMode) {
+                memoGrid[r][c] = (memoGrid[r][c] + 1) % 3;
+            } else {
+                playerGrid[r][c] = (playerGrid[r][c] + 1) % 3;
+                if (playerGrid[r][c] !== 0) memoGrid[r][c] = 0;
+            }
+            if (cellEl) cellEl.updateMirror();
         }
 
-        cell.mirror = (cell.mirror + 1) % 3;
-        drawSector();
-    };
-    container.appendChild(div);
-}
-
-function drawSector() {
-    const container = document.getElementById('grid-container');
-    const canvas = document.getElementById('laser-canvas');
-    container.innerHTML = '';
-    canvas.style.transformOrigin = 'top left';
-
-    if (isGameOver) {
-        // 全体表示 (9x9)
-        container.style.gridTemplateColumns = 'repeat(9, 1fr)';
-        container.style.gridTemplateRows = 'repeat(9, 1fr)';
-        canvas.style.width = '100%';
-        canvas.style.height = '100%';
-        canvas.style.transform = 'translate(0, 0)';
-
-        for (let y = 0; y < 9; y++) {
-            for (let x = 0; x < 9; x++) {
-                createCell(x, y, container);
+        function highlightPair(type, idx) {
+            clearHighlight();
+            let targetPair = rayPairs.find(p => 
+                (p.start.type === type && p.start.idx === idx) || 
+                (p.end.type === type && p.end.idx === idx)
+            );
+            if (targetPair) {
+                const startEl = document.querySelector(`.edge[data-type='${targetPair.start.type}'][data-idx='${targetPair.start.idx}']`);
+                const endEl = document.querySelector(`.edge[data-type='${targetPair.end.type}'][data-idx='${targetPair.end.idx}']`);
+                if (startEl) startEl.classList.add('highlight');
+                if (endEl) endEl.classList.add('highlight-pair');
             }
         }
-    } else {
-        // セクター表示 (3x3)
-        container.style.gridTemplateColumns = 'repeat(3, 1fr)';
-        container.style.gridTemplateRows = 'repeat(3, 1fr)';
-        // キャンバスのサイズを3倍にし、該当セクターの位置へシフトさせる
-        canvas.style.width = '300%';
-        canvas.style.height = '300%';
-        let sy = Math.floor(currentSectorId / 3);
-        let sx = currentSectorId % 3;
-        canvas.style.transform = `translate(-${sx * 33.3333}%, -${sy * 33.3333}%)`;
 
-        for (let y = sy * 3; y < sy * 3 + 3; y++) {
-            for (let x = sx * 3; x < sx * 3 + 3; x++) {
-                createCell(x, y, container);
+        function clearHighlight() {
+            document.querySelectorAll('.edge').forEach(el => el.classList.remove('highlight', 'highlight-pair'));
+        }
+
+        function checkAnswer() {
+            for (let r = 0; r < N; r++) {
+                let count = 0;
+                for (let c = 0; c < N; c++) { if (playerGrid[r][c] !== 0) count++; }
+                if (count !== 2) {
+                    statusText.textContent = `❌ 不正解: ${r+1}行目の鏡が2個ではありません`;
+                    statusText.style.color = "#ff4444";
+                    return;
+                }
             }
-        }
-    }
-    drawCanvas();
-}
-
-function shootLaser() {
-    if (isGameOver) return;
-    
-    if (isShooting && animReq) {
-        cancelAnimationFrame(animReq);
-        isShooting = false;
-    }
-
-    if (remainingShoots <= 0) return;
-
-    remainingShoots--;
-    updateUI();
-    laserPts = [];
-    
-    let curX = startEdge.x;
-    let curY = startEdge.y;
-    let curDir = startEdge.dir; 
-
-    let startPx = curX * CELL_SIZE + CELL_SIZE / 2;
-    let startPy = curY * CELL_SIZE + CELL_SIZE / 2;
-    if (startEdge.side === 'top') startPy -= CELL_SIZE / 2;
-    if (startEdge.side === 'bottom') startPy += CELL_SIZE / 2;
-    if (startEdge.side === 'left') startPx -= CELL_SIZE / 2;
-    if (startEdge.side === 'right') startPx += CELL_SIZE / 2;
-
-    laserPts.push({ x: startPx, y: startPy, event: null });
-
-    while (true) {
-        if (curX < 0 || curX >= 9 || curY < 0 || curY >= 9) break; 
-
-        let cell = grid[curY][curX];
-
-        if (cell.type === 'wall') {
-            laserPts[laserPts.length - 1].event = 'wall';
-            break;
-        }
-
-        let cx = curX * CELL_SIZE + CELL_SIZE / 2;
-        let cy = curY * CELL_SIZE + CELL_SIZE / 2;
-        laserPts.push({ x: cx, y: cy, event: null });
-
-        if (cell.type === 'itemA') {
-            laserPts[laserPts.length - 1].event = 'itemA';
-            break;
-        }
-
-        let nextDir = getReflectedDir(curDir, cell.mirror);
-        let exitX = cx;
-        let exitY = cy;
-        if (nextDir === DIR_UP) exitY -= CELL_SIZE / 2;
-        if (nextDir === DIR_DOWN) exitY += CELL_SIZE / 2;
-        if (nextDir === DIR_LEFT) exitX -= CELL_SIZE / 2;
-        if (nextDir === DIR_RIGHT) exitX += CELL_SIZE / 2;
-
-        laserPts.push({ x: exitX, y: exitY, event: null });
-
-        let isGoal = false;
-        if (goalEdge.x === curX && goalEdge.y === curY) {
-            if (goalEdge.side === 'top' && nextDir === DIR_UP) isGoal = true;
-            if (goalEdge.side === 'bottom' && nextDir === DIR_DOWN) isGoal = true;
-            if (goalEdge.side === 'left' && nextDir === DIR_LEFT) isGoal = true;
-            if (goalEdge.side === 'right' && nextDir === DIR_RIGHT) isGoal = true;
-        }
-
-        if (isGoal) {
-            laserPts[laserPts.length - 1].event = 'goal';
-            break;
-        }
-
-        curX += DX[nextDir];
-        curY += DY[nextDir];
-        curDir = nextDir;
-    }
-
-    laserTotalLength = 0;
-    for (let i = 1; i < laserPts.length; i++) {
-        let dx = laserPts[i].x - laserPts[i-1].x;
-        let dy = laserPts[i].y - laserPts[i-1].y;
-        laserPts[i].dist = Math.sqrt(dx * dx + dy * dy);
-        laserTotalLength += laserPts[i].dist;
-    }
-
-    totalDrawnLength = 0;
-    isShooting = true;
-    lastTime = performance.now();
-    animReq = requestAnimationFrame(animateLaser);
-}
-
-function animateLaser(time) {
-    let dt = time - lastTime;
-    lastTime = time;
-    
-    let speed = 0.8; 
-    totalDrawnLength += speed * dt;
-
-    if (totalDrawnLength >= laserTotalLength) {
-        totalDrawnLength = laserTotalLength;
-        isShooting = false;
-        drawCanvas();
-        handleLaserEnd(laserPts[laserPts.length - 1].event);
-    } else {
-        drawCanvas();
-        animReq = requestAnimationFrame(animateLaser);
-    }
-}
-
-function handleLaserEnd(event) {
-    if (event === 'itemA') {
-        setTimeout(() => {
-            alert('アイテムAに触れました！盤面のすべての鏡が消滅します。');
-            for (let y = 0; y < 9; y++) {
-                for (let x = 0; x < 9; x++) grid[y][x].mirror = 0;
+            for (let c = 0; c < N; c++) {
+                let count = 0;
+                for (let r = 0; r < N; r++) { if (playerGrid[r][c] !== 0) count++; }
+                if (count !== 2) {
+                    statusText.textContent = `❌ 不正解: ${c+1}列目の鏡が2個ではありません`;
+                    statusText.style.color = "#ff4444";
+                    return;
+                }
             }
-            laserPts = [];
-            drawCanvas();
-            drawSector();
-        }, 10);
-    } else if (event === 'goal') {
-        isGameOver = true;
-        updateUI();
-        drawSector(); // 盤面全体を再描画
-        setTimeout(() => alert('クリア！光がゴールに到達しました。'), 50);
-    } else {
-        if (remainingShoots === 0) {
-            isGameOver = true;
-            updateUI();
-            drawSector(); // 盤面全体を再描画
-            setTimeout(() => alert('ゲームオーバー！照射回数が上限に達しました。'), 50);
+
+            let playerPairs = simulateAllRays(playerGrid);
+            for (let i = 0; i < rayPairs.length; i++) {
+                let target = rayPairs[i];
+                let player = playerPairs[i];
+                if (player.end.type !== target.end.type || player.end.idx !== target.end.idx) {
+                    statusText.textContent = "❌ 不正解: 光のつながりが問題のヒントと一致しない場所があります。";
+                    statusText.style.color = "#ff4444";
+                    return;
+                }
+            }
+
+            statusText.textContent = "🎉 正解です！すべての条件を完璧に満たしています！";
+            statusText.style.color = "var(--accent-color)";
         }
-    }
-}
 
-function drawCanvas() {
-    const canvas = document.getElementById('laser-canvas');
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (laserPts.length < 2) return;
-
-    ctx.strokeStyle = 'red';
-    ctx.lineWidth = 4;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(laserPts[0].x, laserPts[0].y);
-
-    let l = totalDrawnLength;
-    for (let i = 1; i < laserPts.length; i++) {
-        if (l >= laserPts[i].dist) {
-            ctx.lineTo(laserPts[i].x, laserPts[i].y);
-            l -= laserPts[i].dist;
-        } else {
-            let ratio = l / laserPts[i].dist;
-            let ix = laserPts[i-1].x + (laserPts[i].x - laserPts[i-1].x) * ratio;
-            let iy = laserPts[i-1].y + (laserPts[i].y - laserPts[i-1].y) * ratio;
-            ctx.lineTo(ix, iy);
-            break;
-        }
-    }
-    ctx.stroke();
-}
-
-initGame();
-</script>
+        initGame();
+    </script>
 </body>
 </html>
